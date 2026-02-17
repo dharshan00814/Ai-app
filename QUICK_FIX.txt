@@ -1,0 +1,87 @@
+# QUICK FIX - Upload & Connection Errors
+
+## 🚨 Main Issue
+**Node.js is not installed!** This is why you can't upload or connect.
+
+## ⚡ Quick Fix (5 minutes)
+
+### 1. Install Node.js
+- Go to: https://nodejs.org/
+- Download **LTS version**
+- Run installer with default settings
+- **RESTART your computer**
+
+### 2. Verify Installation
+```powershell
+node --version
+npm --version
+```
+
+### 3. Install Dependencies
+```powershell
+cd "c:\Users\Dharshan\OneDrive\Desktop\ai app"
+npm install
+```
+
+### 4. Start Server
+```powershell
+npm start
+```
+
+### 5. Open Browser
+```
+http://localhost:3000
+```
+
+---
+
+## ✅ SUCCESS Signs
+
+**Server Console Should Show:**
+```
+🤖 AI Resume Screening System Started
+✓ Server running at: http://localhost:3000
+```
+
+**Browser Should Show:**
+Blue Resume Screening Interface
+
+---
+
+## 🔴 If Still Not Working
+
+### Error: `npm: not recognized`
+→ **Node.js not installed** - Follow Step 1 & 2 above
+
+### Error: `Cannot connect to localhost:3000`
+→ **Server not running** - Check PowerShell window, run `npm start`
+
+### Error: `Failed to fetch`
+→ **Server crashed** - Run `npm start` again, check for errors
+
+### Error: `Invalid file type`
+→ **Wrong format** - Use PDF, DOCX, DOC, or TXT files only
+
+### Error: `API key error`
+→ **Check .env file** - Verify OPENAI_API_KEY is correct
+
+---
+
+## 📚 Full Guide
+See: `INSTALLATION_FIX_GUIDE.md` for complete troubleshooting
+
+---
+
+**Keep the server running while using the app! Don't close the PowerShell window with `npm start`**
+
+---
+
+## What We Fixed
+
+✅ Added PDF parsing support  
+✅ Improved error messages  
+✅ Better CORS configuration  
+✅ Larger file upload support  
+✅ Connection error detection  
+
+Your system is ready to work once Node.js is installed!

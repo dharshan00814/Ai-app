@@ -1,0 +1,184 @@
+# 🎯 IMMEDIATE FIX - Windows PowerShell Terminal Issues
+
+## Problem Summary
+```
+❌ npm: not recognized
+❌ node: not recognized  
+❌ Exit Code: 1
+```
+
+## Root Cause
+**Node.js is NOT installed on your computer**
+
+---
+
+## 🚀 INSTANT FIX (Choose One Option)
+
+### **Option A: Auto-Fix Script (Recommended)**
+
+Run this command in PowerShell:
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& '.\fix-terminal.ps1'"
+```
+
+Or:
+1. Navigate to your project folder: `c:\Users\Dharshan\OneDrive\Desktop\ai app`
+2. Right-click on `fix-terminal.ps1`
+3. Select "Run with PowerShell"
+
+---
+
+### **Option B: Manual 3-Step Fix**
+
+**Step 1: Install Node.js**
+- Download from: https://nodejs.org/ (LTS version)
+- Run the installer
+- Check "Automatically install necessary tools" ✅
+- Click Next → Install
+- **RESTART YOUR COMPUTER**
+
+**Step 2: Verify Installation**
+```powershell
+node --version
+npm --version
+```
+
+You should see version numbers (e.g., v20.10.0, 9.8.1)
+
+**Step 3: Install Project & Run**
+```powershell
+cd "c:\Users\Dharshan\OneDrive\Desktop\ai app"
+npm install
+npm start
+```
+
+---
+
+### **Option C: Diagnostic First**
+
+Run this script first to identify problems:
+```powershell
+.\diagnostic.bat
+```
+
+This will tell you exactly what's wrong.
+
+---
+
+## ✅ How to Know It's Fixed
+
+**PowerShell shows:**
+```
+npm notice version 9.8.1 (or similar)
+npm notice version 20.10.0 (or similar)
+```
+
+**Then run:**
+```powershell
+cd "c:\Users\Dharshan\OneDrive\Desktop\ai app"
+npm start
+```
+
+**Should show:**
+```
+🤖 AI Resume Screening System Started
+✓ Server running at: http://localhost:3000
+```
+
+**Browser shows:**
+```
+http://localhost:3000 → Blue Resume Screening Interface
+```
+
+---
+
+## 🔧 Common PowerShell Issues & Quick Fixes
+
+### Issue: "scripts disabled on this system"
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+# Press: Y and Enter
+```
+
+### Issue: "still not recognized after restart"
+```powershell
+# Close ALL PowerShell windows
+# Restart your computer (full restart)
+# Open NEW PowerShell window
+# Try: node --version
+```
+
+### Issue: "Port 3000 already in use"
+```powershell
+# Option 1: Stop current process
+netstat -ano | findstr :3000
+# Note the PID
+taskkill /PID [PID_HERE] /F
+
+# Option 2: Use different port
+# Edit .env and change: PORT=3001
+# Then: npm start
+```
+
+### Issue: "npm cache error"
+```powershell
+npm cache clean --force
+npm install
+```
+
+---
+
+## 📋 Files to Help You
+
+| File | Purpose |
+|------|---------|
+| `POWERSHELL_FIX.md` | Full PowerShell troubleshooting guide |
+| `fix-terminal.ps1` | Automated PowerShell diagnostic script |
+| `diagnostic.bat` | Windows batch diagnostic script |
+| `QUICK_FIX.txt` | Quick reference card |
+
+---
+
+## 🎯 Success Checklist
+
+Before running your app:
+- ✅ `node --version` shows a version number
+- ✅ `npm --version` shows a version number
+- ✅ You can navigate to: `c:\Users\Dharshan\OneDrive\Desktop\ai app`
+- ✅ `npm install` completes without errors
+- ✅ `npm start` shows no red error messages
+- ✅ Browser can load: `http://localhost:3000`
+
+---
+
+## 💡 Pro Tips
+
+1. **Keep PowerShell window open** while using the app - that's your server running
+2. **Restart computer after Node.js install** - it updates system paths
+3. **Run as Administrator** if you hit permission issues
+4. **Check internet connection** - npm needs to download packages
+5. **Use LTS version** of Node.js(v20), not the latest
+
+---
+
+## 🆘 Still Not Working?
+
+1. Run the diagnostic script: `.\fix-terminal.ps1`
+2. Read the output carefully - it tells you exactly what's wrong
+3. Try Option B (manual installation) from the top
+4. Make sure you fully restart your computer (not just logout)
+5. Check that you're using a NEW PowerShell window after restart
+
+---
+
+## 📞 What's Inside Your Project
+
+- **index.html** - Frontend (blue UI with institute name)
+- **server/server.js** - Backend API
+- **package.json** - All dependencies (express, openai, etc.)
+- **.env** - Configuration with your API key
+- **uploads/** - Where resumes are stored
+
+---
+
+**Ready? Follow Option A or B above and you'll be running in 5 minutes!** 🚀

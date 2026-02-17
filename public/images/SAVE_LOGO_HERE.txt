@@ -1,0 +1,13 @@
+SAVE YOUR COLLEGE LOGO HERE
+=================================
+
+📋 Instructions:
+1. Save your college logo image file in this folder
+2. Rename it to: logo.png
+3. The logo will automatically appear in the header
+
+✅ Supported formats: PNG, JPG, JPEG, GIF, SVG
+📁 Location: C:\Users\Dharshan\OneDrive\Desktop\ai app\public\images\logo.png
+
+The application is already configured to display the logo!
+Just save your image file here as "logo.png" and refresh the page.

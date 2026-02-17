@@ -1,0 +1,204 @@
+# 🚀 FIX CONNECTION ERROR - COMPLETE GUIDE
+
+## What You're Seeing
+```
+🔴 Server Connection Error
+Cannot reach server at http://localhost:3000
+The backend server is not running.
+```
+
+---
+
+## ✅ WHY THIS HAPPENS
+
+The website (frontend) is running, but the **backend server is NOT running**.
+
+**Server won't run because:** Node.js is not installed
+
+---
+
+## 🎯 FIX IN 3 MINUTES
+
+### **1️⃣ Install Node.js (If not already installed)**
+
+**For Windows:**
+
+a) Open browser: **https://nodejs.org/**
+
+b) Click **LTS** button (recommend v20.x)
+
+c) Click **Download for Windows**
+
+d) Run the downloaded `.msi` file
+
+e) In installer:
+   - Click **Next**
+   - Accept License ✅
+   - Keep default path
+   - ✅ **CHECK:** "Automatically install necessary tools"
+   - Click **Install**
+   - Wait for completion
+   
+f) **RESTART YOUR COMPUTER** (very important!)
+
+---
+
+### **2️⃣ Verify Node is Installed**
+
+After restart, open **PowerShell** and type:
+
+```powershell
+node --version
+npm --version
+```
+
+**You should see version numbers like:**
+```
+v20.10.0
+9.8.1
+```
+
+If you see errors, close and open a **NEW PowerShell** window.
+
+---
+
+### **3️⃣ Start the Backend Server**
+
+In PowerShell:
+
+```powershell
+cd "c:\Users\Dharshan\OneDrive\Desktop\ai app"
+npm install
+npm start
+```
+
+**WAIT for this message:**
+```
+============================================================
+🤖 AI Resume Screening System Started
+============================================================
+✓ Server running at: http://localhost:3000
+✓ API Base URL: http://localhost:3000/api
+```
+
+When you see this ✅ **Your server is running!**
+
+---
+
+### **4️⃣ Refresh Your Browser**
+
+- Keep PowerShell window **OPEN** (server must keep running)
+- Go back to browser
+- Press: `Ctrl + F5` (or `Cmd + Shift + R` on Mac)
+- Click **Retry Connection** button
+
+**You should now see the resume upload interface!** ✅
+
+---
+
+## ❌ Troubleshooting
+
+### Problem: "npm: not recognized" even after installing Node.js
+
+**Solution:**
+1. Close PowerShell completely
+2. Restart your computer
+3. Open a NEW PowerShell
+4. Try `npm --version` again
+
+### Problem: "Port 3000 already in use"
+
+**Solution:**
+```powershell
+# Find process using port 3000
+netstat -ano | findstr :3000
+
+# Kill that process (replace 1234 with actual PID)
+taskkill /PID 1234 /F
+
+# Try npm start again
+```
+
+**Alternative:** Use different port:
+```powershell
+# Edit .env file and change: PORT=3001
+# Then run: npm start
+```
+
+### Problem: Still getting connection error after all steps
+
+**Solutions:**
+1. Make sure PowerShell with `npm start` is still open
+2. Try refreshing browser (`Ctrl + F5`)
+3. Check browser console (`F12`) for specific errors
+4. If you see "Cannot find module 'express'":
+   ```powershell
+   npm install
+   npm start
+   ```
+
+### Problem: "Module not found" errors
+
+**Solution:**
+```powershell
+# Delete old packages
+Remove-Item node_modules -Recurse -Force
+Remove-Item package-lock.json
+
+# Reinstall fresh
+npm install
+npm start
+```
+
+---
+
+## 📋 Quick Checklist
+
+Before trying again, verify:
+
+- ✅ `node --version` shows a version (not error)
+- ✅ `npm --version` shows a version (not error)
+- ✅ You can navigate to: `c:\Users\Dharshan\OneDrive\Desktop\ai app`
+- ✅ Ran `npm install` (no errors)
+- ✅ Ran `npm start` (shows no red errors)
+- ✅ PowerShell window is still OPEN
+- ✅ Browser shows "🤖 AI Resume Screening System Started" after refresh
+
+---
+
+## 🎯 Summary
+
+| Step | Command | What it means |
+|------|---------|---------------|
+| Install Node.js | Go to nodejs.org | Get Node.js and npm |
+| Restart | Restart computer | Apply Node.js installation |
+| Navigate | `cd "c:\...ai app"` | Go to project folder |
+| Install deps | `npm install` | Download libraries |
+| Start server | `npm start` | Run backend server |
+| Refresh | Press `Ctrl+F5` | Reload webpage |
+
+---
+
+## ✨ Once Connected
+
+You'll be able to:
+1. Upload resumes (PDF, DOC, DOCX, TXT)
+2. AI analyzes them automatically
+3. See scores and recommendations
+4. Send to principal for approval
+5. View statistics
+
+---
+
+## 🔗 Useful Resources
+
+- **Node.js Download:** https://nodejs.org/
+- **Project Folder:** `c:\Users\Dharshan\OneDrive\Desktop\ai app`
+- **Server File:** `server/server.js`
+- **Frontend File:** `index.html`
+
+---
+
+**Follow the 4 steps above and your server will be running in 5 minutes!** 🚀
+
+**IMPORTANT:** Keep the PowerShell window open with `npm start` - that's your server!

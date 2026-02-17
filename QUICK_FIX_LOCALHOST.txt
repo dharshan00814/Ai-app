@@ -1,0 +1,133 @@
+# 🎯 LOCALHOST CONNECTION ERROR - QUICK VISUAL FIX
+
+## 🔴 You're Seeing This
+
+```
+╔════════════════════════════════════════╗
+║    🔴 Server Connection Error          ║
+║                                        ║
+║  The backend server is not running.   ║
+║  Cannot reach: http://localhost:3000  ║
+║                                        ║
+║  Follow the steps below to fix it     ║
+╚════════════════════════════════════════╝
+```
+
+---
+
+## ✅ SOLUTION (Copy-Paste Ready)
+
+### **STEP 1: Install Node.js** 
+
+Go to: https://nodejs.org/ 
+- Click LTS (v20.x) 
+- Download Windows Installer
+- Run it, check ✅ "Automatically install necessary tools"
+- **RESTART COMPUTER**
+
+---
+
+### **STEP 2: Open PowerShell & Check Installation**
+
+Press `Windows Key` and type: `PowerShell`
+
+Then copy-paste this:
+
+```powershell
+node --version
+npm --version
+```
+
+You should see:
+```
+v20.10.0
+9.8.1
+```
+
+---
+
+### **STEP 3: Navigate to Project**
+
+Copy-paste this in PowerShell:
+
+```powershell
+cd "c:\Users\Dharshan\OneDrive\Desktop\ai app"
+```
+
+---
+
+### **STEP 4: Install Dependencies**
+
+Copy-paste:
+
+```powershell
+npm install
+```
+
+Wait for it to finish (shows: `added XXX packages`)
+
+---
+
+### **STEP 5: Start the Server**
+
+Copy-paste:
+
+```powershell
+npm start
+```
+
+**WAIT for this message:**
+
+```
+🤖 AI Resume Screening System Started
+✓ Server running at: http://localhost:3000
+```
+
+When you see this = Server is running! ✅
+
+**DO NOT CLOSE PowerShell!**
+
+---
+
+### **STEP 6: Refresh Browser**
+
+- Go back to browser tab
+- Press: `Ctrl + F5` (force refresh)
+- Click **Retry Connection** button
+
+**Done!** The app should now work! 🎉
+
+---
+
+## 🆘 Emergency Checklist
+
+If still not working:
+
+- [ ] Did you install Node.js? (`node --version` = no error)
+- [ ] Did you restart computer after Node.js install? 
+- [ ] Did you run `npm install`? (no red errors)
+- [ ] Is PowerShell window with `npm start` STILL OPEN?
+- [ ] Did you refresh browser (`Ctrl + F5`)?
+- [ ] Try closing PowerShell and running `npm start` again
+- [ ] Check browser console (F12) for error details
+
+---
+
+## 📞 Still Broken?
+
+Read the full guide: `CONNECTION_ERROR_FIX.md`
+
+---
+
+## ✨ What Happens Next
+
+If everything worked:
+- You can upload resumes
+- AI analyzes them
+- See scores and feedback
+- Send to principal
+- View dashboard stats
+
+---
+
+**5-minute fix, then you're good to go!** 🚀

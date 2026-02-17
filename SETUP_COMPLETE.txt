@@ -1,0 +1,262 @@
+🤖 AI Resume Screening System - Complete Setup
+================================================
+
+IMPORTANT: Your OpenAI API key is already configured in the .env file.
+
+📁 PROJECT STRUCTURE
+====================
+ai app/
+├── 📄 index.html              ← Main frontend interface
+├── 📄 package.json            ← Project dependencies
+├── 📄 .env                    ← Configuration (API keys, etc.)
+├── 📄 .gitignore              ← Git ignore rules
+├── 📄 Procfile                ← Heroku deployment
+├── 📄 Dockerfile              ← Docker container setup
+├── 📄 README.md               ← Full documentation
+├── 📄 QUICK_START.md          ← Quick start guide
+├── 📄 DEPLOYMENT_GUIDE.md     ← Production deployment
+├── 📄 DATABASE_SCHEMA.js      ← Database structure reference
+├── 📄 API_EXAMPLES.js         ← API usage examples
+│
+├── 📁 server/
+│   ├── 📄 server.js           ← Main backend server
+│   └── 📄 config.js           ← Configuration settings
+│
+├── 📁 uploads/                ← Uploaded resumes stored here
+│   └── .gitkeep              ← Placeholder file
+│
+└── 📁 public/                 ← Static files (if needed)
+
+
+🚀 QUICK START (3 STEPS)
+========================
+
+Step 1: Install Dependencies
+  Windows (PowerShell):
+    npm install
+
+  Mac/Linux:
+    npm install
+
+Step 2: Start the Server
+  npm start
+
+Step 3: Open in Browser
+  http://localhost:3000
+
+
+📊 HOW IT WORKS
+===============
+
+1. UPLOAD RESUMES
+   ↓
+2. AI ANALYSIS (Using OpenAI GPT)
+   ├─ Approves if score ≥ 60%
+   └─ Rejects if score < 60%
+   ↓
+3. APPROVED → SEND TO PRINCIPAL
+   ↓
+4. PRINCIPAL REVIEWS & MAKES FINAL DECISION
+
+
+✨ KEY FEATURES
+===============
+
+✅ Drag & drop resume upload (PDF, DOCX, DOC, TXT)
+✅ AI-powered resume analysis with scoring
+✅ Two-tier approval workflow (AI → Principal)
+✅ Real-time status tracking
+✅ Candidate strengths & weaknesses analysis
+✅ Principal notification system
+✅ Statistics dashboard
+✅ Mobile responsive design
+✅ Fast processing with OpenAI GPT
+
+
+📚 API ENDPOINTS
+================
+
+Upload Resumes:
+  POST /api/upload
+
+Analyze Resume:
+  POST /api/analyze
+
+Send to Principal:
+  POST /api/send-approval
+
+Get All Results:
+  GET /api/results
+
+System Health:
+  GET /api/health
+
+
+🔐 SECURITY NOTES
+=================
+
+⚠️  Your API key is in .env - Keep it private!
+   - Never commit .env to Git
+   - Never share your API key publicly
+   - Regenerate key if compromised
+
+✅ In production:
+   - Use environment variables
+   - Enable HTTPS
+   - Add authentication
+   - Implement rate limiting
+   - Set proper CORS headers
+
+
+📦 SUPPORTED FILE FORMATS
+==========================
+
+- PDF (.pdf)
+- Word Documents (.docx, .doc)
+- Text Files (.txt)
+- Maximum file size: 10MB
+
+
+🎯 SCORING GUIDE
+================
+
+90-100%  🟢 EXCELLENT  → Highly recommended for principal review
+70-89%   🟡 GOOD       → Strong candidate
+50-69%   🟠 FAIR       → Some concerns noted
+Below 50% 🔴 POOR       → Does not meet criteria
+
+
+🛠️ TROUBLESHOOTING
+===================
+
+Q: Port 3000 already in use?
+A: Change PORT in .env file to 3001 or 3002, then restart
+
+Q: "Module not found" error?
+A: Run: npm install
+
+Q: API errors?
+A: Check .env for valid OpenAI API key and internet connection
+
+Q: Resume upload fails?
+A: Check file size (max 10MB) and format (PDF, DOCX, DOC, TXT)
+
+
+📈 NEXT STEPS
+=============
+
+1. Test with sample resumes
+2. Customize scoring criteria in server/config.js
+3. Set up principal email notifications
+4. Deploy to production (see DEPLOYMENT_GUIDE.md)
+5. Integrate with your HR system
+6. Add database (MongoDB, PostgreSQL)
+7. Implement user authentication
+
+
+📧 CONFIGURATION
+================
+
+Backend Server: http://localhost:3000
+Frontend URL: http://localhost:3000
+API Base: http://localhost:3000/api
+
+Principal Email: Set in .env (PRINCIPAL_EMAIL)
+OpenAI Model: gpt-3.5-turbo
+Max Resume Size: 10MB
+
+
+📚 DOCUMENTATION FILES
+======================
+
+- README.md              → Full documentation
+- QUICK_START.md        → Quick start guide
+- API_EXAMPLES.js       → API usage examples
+- DATABASE_SCHEMA.js    → Database structure reference
+- DEPLOYMENT_GUIDE.md   → Production deployment instructions
+- server/config.js      → Configuration constants
+
+
+🎓 LEARNING RESOURCES
+=====================
+
+- Start with: QUICK_START.md
+- Then read: README.md
+- API details: API_EXAMPLES.js
+- Deployment: DEPLOYMENT_GUIDE.md
+
+
+✅ DEPLOYMENT OPTIONS
+=====================
+
+Local Development:
+  npm start
+
+Heroku:
+  git push heroku main
+
+Docker:
+  docker build -t resume-screening .
+  docker run -p 3000:3000 resume-screening
+
+AWS Elastic Beanstalk:
+  eb deploy
+
+See DEPLOYMENT_GUIDE.md for detailed instructions
+
+
+💡 TIPS
+=======
+
+1. Test the system with sample resumes first
+2. Tune scoring thresholds based on your needs
+3. Review AI feedback to improve criteria
+4. Keep API key secure and rotate periodically
+5. Monitor API usage to manage costs
+6. Implement database backup strategy
+7. Add user authentication for production
+
+
+🤝 SUPPORT
+==========
+
+For issues:
+1. Check browser console for errors (F12)
+2. Check server logs in terminal
+3. Verify .env configuration
+4. Review README.md for solutions
+5. Re-run npm install if needed
+
+
+📝 NOTES
+========
+
+- System stores resume data in memory (development mode)
+- For production, add database (MongoDB/PostgreSQL)
+- Principal approval workflow requires email setup
+- AI analysis requires OpenAI API credits
+- System logs important actions to console
+
+
+🎯 PRODUCTION CHECKLIST
+=======================
+
+Before deploying to production:
+
+☐ Replace sample API key with production key
+☐ Set up database (MongoDB or PostgreSQL)
+☐ Enable HTTPS/SSL certificates
+☐ Configure email notifications
+☐ Add user authentication
+☐ Implement rate limiting
+☐ Set up error monitoring (Sentry)
+☐ Configure backups
+☐ Test disaster recovery
+☐ Set up logging and monitoring
+☐ Security audit
+☐ Load testing
+
+
+Ready to start? Run: npm start
+
+For more help, see QUICK_START.md 📖
