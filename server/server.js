@@ -39,13 +39,29 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // Middleware - CORS Configuration
-app.use(cors({
-    origin: ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', '*'],
+const allowedOrigins = new Set([
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5500',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:5500'
+]);
+
+const corsOptions = {
+    origin: (origin, callback) => {
+        if (!origin || allowedOrigins.has(origin)) {
+            return callback(null, true);
+        }
+        return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
     methods: ['GET', 'POST', 'OPTIONS'],
     credentials: true,
     optionsSuccessStatus: 200,
     allowedHeaders: ['Content-Type', 'Authorization']
-}));
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -61,7 +77,7 @@ const asyncHandler = (fn) => (req, res, next) => {
     Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS || '12000', 10);
+const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS || '30000', 10);
 
 const withTimeout = (promise, ms, label) => {
     let timeoutId;
@@ -107,17 +123,40 @@ const upload = multer({
     limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
 
-// OpenAI Configuration
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-});
+// Check if API keys are configured
+const hasOpenAIKey = process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.length > 0;
+const hasGoogleKey = process.env.GOOGLE_API_KEY && process.env.GOOGLE_API_KEY.length > 0;
 
-// Google Gemini Configuration
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+// OpenAI Configuration - only initialize if key is provided
+let openai = null;
+if (hasOpenAIKey) {
+    openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY
+    });
+}
+
+// Google Gemini Configuration - only initialize if key is provided
+let model = null;
+if (hasGoogleKey) {
+    try {
+        const { GoogleGenerativeAI } = require('@google/generative-ai');
+        const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+        const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+        model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    } catch (e) {
+        console.warn('⚠️ Google Gemini initialization failed:', e.message);
+    }
+}
+
+// Log API key status at startup
+console.log('\n📋 API Configuration Status:');
+console.log(`   OpenAI API Key: ${hasOpenAIKey ? '✅ Configured' : '❌ Not Set'}`);
+console.log(`   Google API Key: ${hasGoogleKey ? '✅ Configured' : '❌ Not Set'}`);
+console.log(`   AI Service: ${process.env.AI_SERVICE || 'google'}\n`);
 
 // Store for analysis results (in production, use database)
 let analysisDatabase = [];
+const uploadedFileIndex = new Map();
 
 // Utility: Extract text from resume
 async function extractTextFromResume(filePath) {
@@ -206,7 +245,7 @@ Format your response as JSON:
         const aiService = process.env.AI_SERVICE || 'google';
         
         // Try Google Gemini first (if configured)
-        if (aiService === 'google' && process.env.GOOGLE_API_KEY) {
+        if (aiService === 'google' && process.env.GOOGLE_API_KEY && model) {
             try {
                 console.log('🔵 Using Google Gemini API...');
                 const result = await withTimeout(
@@ -216,30 +255,73 @@ Format your response as JSON:
                 );
                 content = result.response.text();
             } catch (googleError) {
-                console.warn('⚠️ Google Gemini failed, trying OpenAI:', googleError.message);
-                // Fall back to OpenAI
-                const response = await withTimeout(
-                    openai.chat.completions.create({
-                        model: "gpt-3.5-turbo",
-                        messages: [
-                            {
-                                role: "system",
-                                content: "You are an expert HR recruiting assistant. Analyze resumes and provide screening recommendations based on typical job requirements."
-                            },
-                            {
-                                role: "user",
-                                content: prompt
+                const googleErrorMessage = (googleError && googleError.message) ? googleError.message : String(googleError);
+                console.warn('⚠️ Google Gemini failed:', googleErrorMessage);
+
+                // Check if it's a quota error
+                if (googleErrorMessage.includes('429') || googleErrorMessage.includes('quota') || googleErrorMessage.includes('rate limit')) {
+                    console.warn('⚠️ Google Gemini quota exceeded. Trying OpenAI...');
+                    
+                    if (openai) {
+                        try {
+                            const response = await withTimeout(
+                                openai.chat.completions.create({
+                                    model: "gpt-3.5-turbo",
+                                    messages: [
+                                        {
+                                            role: "system",
+                                            content: "You are an expert HR recruiting assistant. Analyze resumes and provide screening recommendations based on typical job requirements."
+                                        },
+                                        {
+                                            role: "user",
+                                            content: prompt
+                                        }
+                                    ],
+                                    temperature: 0.7,
+                                    max_tokens: 600
+                                }),
+                                AI_TIMEOUT_MS,
+                                'OpenAI request'
+                            );
+                            content = response.choices[0].message.content;
+                        } catch (openaiError) {
+                            const openaiErrorMsg = openaiError.message || String(openaiError);
+                            if (openaiErrorMsg.includes('401') || openaiErrorMsg.includes('invalid api key') || openaiErrorMsg.includes('API key')) {
+                                throw new Error('⚠️ Both Google Gemini (quota exceeded) and OpenAI (invalid API key) failed. Please check your API keys in the .env file.');
                             }
-                        ],
-                        temperature: 0.7,
-                        max_tokens: 600
-                    }),
-                    AI_TIMEOUT_MS,
-                    'OpenAI request'
-                );
-                content = response.choices[0].message.content;
+                            throw openaiError;
+                        }
+                    } else {
+                        throw new Error('⚠️ Google Gemini quota exceeded and OpenAI is not configured. Please check your API keys.');
+                    }
+                } else if (!process.env.OPENAI_KEY) {
+                    throw googleError;
+                } else {
+                    // Try OpenAI as fallback
+                    console.warn('⚠️ Falling back to OpenAI...');
+                    const response = await withTimeout(
+                        openai.chat.completions.create({
+                            model: "gpt-3.5-turbo",
+                            messages: [
+                                {
+                                    role: "system",
+                                    content: "You are an expert HR recruiting assistant. Analyze resumes and provide screening recommendations based on typical job requirements."
+                                },
+                                {
+                                    role: "user",
+                                    content: prompt
+                                }
+                            ],
+                            temperature: 0.7,
+                            max_tokens: 600
+                        }),
+                        AI_TIMEOUT_MS,
+                        'OpenAI request'
+                    );
+                    content = response.choices[0].message.content;
+                }
             }
-        } else {
+        } else if (openai) {
             // Use OpenAI directly
             console.log('🟢 Using OpenAI API...');
             const response = await withTimeout(
@@ -262,6 +344,8 @@ Format your response as JSON:
                 'OpenAI request'
             );
             content = response.choices[0].message.content;
+        } else {
+            throw new Error('⚠️ No AI service configured. Please set either GOOGLE_API_KEY or OPENAI_API_KEY in the .env file.');
         }
         
         // Parse JSON from response
@@ -288,47 +372,19 @@ Format your response as JSON:
         throw new Error('Unable to parse AI response');
     } catch (error) {
         let errorMsg = error.message || 'Unknown error';
+        const lowerErrorMsg = errorMsg.toLowerCase();
         
-        // Provide better error messages
-        if (error.status === 429) {
-            errorMsg = '⚠️ API quota exceeded. Using mock analysis for demo.';
+        // Provide better error messages (check quota first, before invalid key)
+        if (error.status === 429 || lowerErrorMsg.includes('429') || lowerErrorMsg.includes('quota') || lowerErrorMsg.includes('exceeded')) {
+            errorMsg = '⚠️ API quota exceeded. Please check billing/quota for your AI provider.';
         } else if (error.code === 'ECONNRESET' || error.code === 'ECONNREFUSED') {
-            errorMsg = '⚠️ Cannot connect to AI API. Using mock analysis for demo.';
-        } else if (error.status === 401) {
-            errorMsg = '⚠️ Invalid API key. Using mock analysis for demo.';
+            errorMsg = '⚠️ Cannot connect to AI API. Please check network and API service status.';
+        } else if (error.status === 401 || lowerErrorMsg.includes('401') || lowerErrorMsg.includes('invalid api key')) {
+            errorMsg = '⚠️ Invalid API key. Please update OPENAI_API_KEY or GOOGLE_API_KEY.';
         }
         
         console.error('⚠️ AI Analysis Error:', errorMsg);
-        
-        // Detect if degree is mentioned in resume
-        const resumeTextLower = (resumeText || '').toLowerCase();
-        let detectedDegree = null;
-        if (resumeTextLower.includes('phd') || resumeTextLower.includes('ph.d')) {
-            detectedDegree = 'PhD';
-        } else if (resumeTextLower.includes('m.e') || resumeTextLower.includes('master of engineering') || resumeTextLower.includes('masters')) {
-            detectedDegree = 'M.E';
-        }
-        
-        // Generate mock analysis when APIs fail
-        const mockScore = 0.65 + Math.random() * 0.25; // 65-90%
-        const mockStrengths = ['Strong technical background', 'Good communication skills', 'Relevant experience'];
-        const mockWeaknesses = ['Limited project experience', 'Few certifications'];
-        
-        return {
-            candidateName: candidateName,
-            score: mockScore,
-            degree: detectedDegree,
-            hasCommunicationSkills: true,
-            technicalSkills: ['Python', 'Java', 'JavaScript'].sort(() => Math.random() - 0.5).slice(0, 2),
-            strengths: mockStrengths,
-            weaknesses: mockWeaknesses,
-            assessment: "Resume shows good match with required qualifications. Candidate demonstrates relevant skills and experience.",
-            feedback: `Strengths: ${mockStrengths.join(', ')}\nWeaknesses: ${mockWeaknesses.join(', ')}`,
-            status: mockScore > 0.7 ? "approved" : "approved",
-            recommendation: "APPROVED",
-            timestamp: new Date(),
-            mockAnalysis: true
-        };
+        throw new Error(errorMsg);
     }
 }
 
@@ -351,6 +407,14 @@ app.post('/api/upload', upload.array('resumes', 10), asyncHandler(async (req, re
             uploadedAt: new Date(),
             status: 'uploaded'
         }));
+
+        uploadedFiles.forEach(file => {
+            uploadedFileIndex.set(file.id, {
+                path: file.path,
+                name: file.name,
+                uploadedAt: file.uploadedAt
+            });
+        });
 
         console.log(`✅ Uploaded ${uploadedFiles.length} file(s)`);
 
@@ -381,49 +445,25 @@ app.post('/api/analyze', asyncHandler(async (req, res) => {
             });
         }
 
-        // Find the file
-        const uploadDir = path.join(__dirname, '../uploads');
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
-        }
-
-        const files = fs.readdirSync(uploadDir).filter(f => !f.startsWith('.'));
-
-        if (files.length === 0) {
+        const fileMeta = uploadedFileIndex.get(fileId);
+        if (!fileMeta || !fileMeta.path || !fs.existsSync(fileMeta.path)) {
             return res.status(404).json({
                 success: false,
-                message: 'No files found to analyze'
+                message: 'Uploaded file not found for analysis. Please upload again.'
             });
         }
-
-        // Use the most recently uploaded file
-        const latestFile = files.sort().reverse()[0];
-        const filePath = path.join(uploadDir, latestFile);
+        const filePath = fileMeta.path;
+        const fileName = fileMeta.name || path.basename(filePath);
 
         // Extract text from resume
-        console.log(`📄 Extracting text from: ${latestFile}`);
+        console.log(`📄 Extracting text from: ${fileName}`);
         const resumeText = await extractTextFromResume(filePath);
 
         if (!resumeText || resumeText.trim().length === 0) {
-            console.error('❌ Text extraction failed for:', latestFile);
-            // Return mock if extraction fails
-            const mockAnalysis = {
-                candidateName: 'Candidate (extraction failed)',
-                score: 0.75,
-                degree: 'M.E',
-                hasCommunicationSkills: true,
-                technicalSkills: ['Python', 'Java'],
-                strengths: ['Technical background', 'Communication'],
-                weaknesses: ['More experience needed'],
-                status: 'approved',
-                recommendation: 'APPROVED',
-                mockAnalysis: true
-            };
-            analysisDatabase.push({ fileId, filePath, analysis: mockAnalysis });
-            return res.json({
-                success: true,
-                message: 'Resume analyzed (fallback)',
-                analysis: mockAnalysis
+            console.error('❌ Text extraction failed for:', fileName);
+            return res.status(422).json({
+                success: false,
+                message: 'Could not extract text from this resume. Please upload a text-based PDF/DOCX/TXT file.'
             });
         }
 
@@ -431,7 +471,7 @@ app.post('/api/analyze', asyncHandler(async (req, res) => {
         console.log(`🤖 Analyzing with AI...`);
         const analysis = await analyzeResumeWithAI(
             resumeText.substring(0, 2500),
-            path.parse(latestFile).name
+            path.parse(fileName).name
         );
 
         // Store in database
@@ -451,23 +491,15 @@ app.post('/api/analyze', asyncHandler(async (req, res) => {
 
     } catch (error) {
         console.error('❌ Analysis error:', error.message);
-        // Return mock result on error instead of 500
-        const mockFallback = {
-            candidateName: 'Candidate',
-            score: 0.75,
-            degree: 'M.E',
-            hasCommunicationSkills: true,
-            technicalSkills: ['Python', 'Java'],
-            strengths: ['Technical skills', 'Communication'],
-            weaknesses: ['Experience'],
-            status: 'approved',
-            recommendation: 'APPROVED',
-            mockAnalysis: true
-        };
-        res.json({
-            success: true,
-            message: 'Resume analyzed (using fallback)',
-            analysis: mockFallback
+        
+        // Check if it's a quota error
+        const errorMsg = error.message || '';
+        const isQuotaError = errorMsg.includes('quota') || errorMsg.includes('429');
+        
+        res.status(isQuotaError ? 402 : 500).json({
+            success: false,
+            message: `Analysis failed: ${error.message}`,
+            error: isQuotaError ? 'quota_exceeded' : 'analysis_failed'
         });
     }
 }));

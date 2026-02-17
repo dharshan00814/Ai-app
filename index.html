@@ -1592,6 +1592,11 @@
                 })
                 .catch(err => {
                     console.error('Analysis error:', err);
+                    const uploadedFile = uploadedFiles.find(f => f.id === fileId);
+                    if (uploadedFile) {
+                        uploadedFile.status = 'rejected';
+                        updateFileList();
+                    }
                     if (err.message.includes('Failed to fetch') || err.message.includes('ERR_')) {
                         showMessage(`❌ Server connection error. Check if server is running at ${API_URL}`, 'error');
                     } else {
@@ -1652,9 +1657,9 @@
                     ${result.degree ? `<div class="result-score">🎓 <strong>Degree:</strong> ${result.degree}</div>` : ''}
                     ${result.hasCommunicationSkills !== undefined ? `<div class="result-score">💬 <strong>Communication Skills:</strong> ${result.hasCommunicationSkills ? '✓ Present' : '✗ Not found'}</div>` : ''}
                     ${result.technicalSkills && result.technicalSkills.length > 0 ? `<div class="result-score" style="margin-bottom: 10px;">💻 <strong>Tech Skills:</strong> ${result.technicalSkills.join(', ')}</div>` : ''}
-                    <div class="result-score"><strong>Strengths:</strong> ${result.strengths.join(', ') || 'N/A'}</div>
-                    <div class="result-score" style="margin-bottom: 10px;"><strong>Weaknesses:</strong> ${result.weaknesses.join(', ') || 'N/A'}</div>
-                    <div class="result-feedback">${result.feedback}</div>
+                    <div class="result-score"><strong>Strengths:</strong> ${Array.isArray(result.strengths) && result.strengths.length > 0 ? result.strengths.join(', ') : 'N/A'}</div>
+                    <div class="result-score" style="margin-bottom: 10px;"><strong>Weaknesses:</strong> ${Array.isArray(result.weaknesses) && result.weaknesses.length > 0 ? result.weaknesses.join(', ') : 'N/A'}</div>
+                    <div class="result-feedback">${result.feedback || result.assessment || 'No detailed feedback available.'}</div>
                     <div class="action-buttons">
                         ${result.status === 'approved' ? `
                             <button class="btn-small btn-send" onclick="sendForApproval(${index})">📧 Send to Principal</button>
