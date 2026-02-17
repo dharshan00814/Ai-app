@@ -279,4 +279,3 @@ module.exports = {
     debugHelpers,
     exampleCommands
 };
-`;
