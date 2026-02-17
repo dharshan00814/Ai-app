@@ -618,6 +618,130 @@ app.post('/api/cleanup', asyncHandler(async (req, res) => {
     });
 }));
 
+// Chat with AI chatbot endpoint
+app.post('/api/chat', asyncHandler(async (req, res) => {
+    try {
+        const { message } = req.body;
+
+        if (!message) {
+            return res.status(400).json({
+                success: false,
+                message: 'Message is required'
+            });
+        }
+
+        console.log(`💬 Chat request: ${message}`);
+
+        // Build the chatbot prompt
+        const chatPrompt = `You are an AI Resume Assistant for Stella Mary's College of Engineering. 
+You help students and job seekers with:
+- Resume writing tips and improvements
+- Interview preparation
+- Career guidance
+- Technical skills advice (Python, Java, C++, HTML, JavaScript, CSS)
+- How to score 100% on resume screening
+- Communication skills development
+
+Be friendly, helpful, and concise. Use emoji where appropriate. Provide practical advice.
+
+User question: ${message}`;
+
+        let content;
+        const aiService = process.env.AI_SERVICE || 'google';
+
+        // Try Google Gemini first
+        if (aiService === 'google' && process.env.GOOGLE_API_KEY && model) {
+            try {
+                console.log('🔵 Using Google Gemini for chat...');
+                const result = await withTimeout(
+                    model.generateContent(chatPrompt),
+                    AI_TIMEOUT_MS,
+                    'Gemini chat request'
+                );
+                content = result.response.text();
+            } catch (googleError) {
+                const googleErrorMessage = googleError?.message || String(googleError);
+                console.warn('⚠️ Google Gemini chat failed:', googleErrorMessage);
+
+                // Check if quota error, try OpenAI
+                if (googleErrorMessage.includes('429') || googleErrorMessage.includes('quota')) {
+                    if (openai) {
+                        try {
+                            console.log('🟢 Trying OpenAI for chat...');
+                            const response = await withTimeout(
+                                openai.chat.completions.create({
+                                    model: "gpt-3.5-turbo",
+                                    messages: [
+                                        {
+                                            role: "system",
+                                            content: "You are a friendly AI Resume Assistant for Stella Mary's College of Engineering. Help users with resume tips, interview prep, career guidance, and technical skills advice."
+                                        },
+                                        {
+                                            role: "user",
+                                            content: message
+                                        }
+                                    ],
+                                    temperature: 0.7,
+                                    max_tokens: 500
+                                }),
+                                AI_TIMEOUT_MS,
+                                'OpenAI chat request'
+                            );
+                            content = response.choices[0].message.content;
+                        } catch (openaiError) {
+                            throw new Error('AI services unavailable. Please try again later.');
+                        }
+                    } else {
+                        throw new Error('AI services not configured. Please check API keys.');
+                    }
+                } else {
+                    throw googleError;
+                }
+            }
+        } else if (openai) {
+            // Use OpenAI directly
+            console.log('🟢 Using OpenAI for chat...');
+            const response = await withTimeout(
+                openai.chat.completions.create({
+                    model: "gpt-3.5-turbo",
+                    messages: [
+                        {
+                            role: "system",
+                            content: "You are a friendly AI Resume Assistant for Stella Mary's College of Engineering. Help users with resume tips, interview prep, career guidance, and technical skills advice."
+                        },
+                        {
+                            role: "user",
+                            content: message
+                        }
+                    ],
+                    temperature: 0.7,
+                    max_tokens: 500
+                }),
+                AI_TIMEOUT_MS,
+                'OpenAI chat request'
+            );
+            content = response.choices[0].message.content;
+        } else {
+            throw new Error('No AI service configured. Please set OPENAI_API_KEY or GOOGLE_API_KEY in .env file.');
+        }
+
+        console.log(`✅ Chat response generated`);
+
+        res.json({
+            success: true,
+            message: content,
+            timestamp: new Date()
+        });
+
+    } catch (error) {
+        console.error('❌ Chat error:', error.message);
+        res.status(500).json({
+            success: false,
+            message: `Chat failed: ${error.message}`
+        });
+    }
+}));
+
 // Global error handling middleware
 app.use((err, req, res, next) => {
     console.error('❌ Error:', err.message);
