@@ -27,8 +27,8 @@ const CRITERIA_WEIGHTS = {
 
 // File Upload Configuration
 const UPLOAD_CONFIG = {
-    MAX_FILE_SIZE: 10 * 1024 * 1024,  // 10MB
-    MAX_FILES_PER_UPLOAD: 10,
+    MAX_FILE_SIZE: 50 * 1024 * 1024,  // 50MB
+    MAX_FILES_PER_UPLOAD: 1000,
     SUPPORTED_FORMATS: ['pdf', 'docx', 'doc', 'txt'],
     UPLOAD_DIR: './uploads',
     RETENTION_DAYS: 30  // Auto-delete after 30 days
@@ -39,8 +39,16 @@ const AI_CONFIG = {
     MODEL: 'gpt-3.5-turbo',
     TEMPERATURE: 0.7,
     MAX_TOKENS: 1000,
-    TIMEOUT: 30000,  // 30 seconds
+    TIMEOUT: 40000,  // 40 seconds
     RETRY_ATTEMPTS: 3
+};
+
+// Ollama Local LLM Configuration
+const OLLAMA_CONFIG = {
+    HOST: process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || 'http://127.0.0.1:11434',
+    MODEL: process.env.OLLAMA_MODEL || 'llama3.2',
+    TIMEOUT: parseInt(process.env.OLLAMA_TIMEOUT_MS || process.env.OLLAMA_TIMEOUT || '60000', 10),  // 60 seconds for local models
+    STREAM: false  // Set to true for streaming responses
 };
 
 // Email Configuration
@@ -110,6 +118,7 @@ module.exports = {
     CRITERIA_WEIGHTS,
     UPLOAD_CONFIG,
     AI_CONFIG,
+    OLLAMA_CONFIG,
     EMAIL_CONFIG,
     LOG_CONFIG,
     ROLES,

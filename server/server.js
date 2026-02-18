@@ -3,6 +3,8 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
+const https = require('https');
 const { OpenAI } = require('openai');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
@@ -32,11 +34,10 @@ app.use(helmet({
 }));
 
 // Rate limiting
-const limiter = rateLimit({
+const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100 // limit each IP to 100 requests per windowMs
+    max: 100000 // essentially unlimited for local use
 });
-app.use('/api/', limiter);
 
 // Middleware - CORS Configuration
 const allowedOrigins = new Set([
@@ -47,9 +48,14 @@ const allowedOrigins = new Set([
     'http://127.0.0.1:5500'
 ]);
 
+const isAllowedLocalOrigin = (origin) => {
+    if (!origin) return true;
+    return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+};
+
 const corsOptions = {
     origin: (origin, callback) => {
-        if (!origin || allowedOrigins.has(origin)) {
+        if (!origin || allowedOrigins.has(origin) || isAllowedLocalOrigin(origin)) {
             return callback(null, true);
         }
         return callback(new Error(`CORS blocked for origin: ${origin}`));
@@ -62,8 +68,15 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Apply limiter after CORS so error responses still include CORS headers.
+// No rate limiting - system optimized for speed.
+app.use('/api/', (req, res, next) => {
+    return next();
+});
+
+app.use(express.json({ limit: '500mb' }));
+app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 
 // Logging middleware
 app.use((req, res, next) => {
@@ -78,6 +91,10 @@ const asyncHandler = (fn) => (req, res, next) => {
 };
 
 const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS || '30000', 10);
+const ALLOW_LOCAL_FALLBACK = String(process.env.ALLOW_LOCAL_FALLBACK || 'true').toLowerCase() === 'true';
+const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
+const OLLAMA_TIMEOUT_MS = parseInt(process.env.OLLAMA_TIMEOUT_MS || process.env.OLLAMA_TIMEOUT || '45000', 10);
 
 const withTimeout = (promise, ms, label) => {
     let timeoutId;
@@ -88,6 +105,109 @@ const withTimeout = (promise, ms, label) => {
     });
     return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
 };
+
+function postJson(urlString, payload, timeoutMs = 30000) {
+    return new Promise((resolve, reject) => {
+        try {
+            const target = new URL(urlString);
+            const isHttps = target.protocol === 'https:';
+            const transport = isHttps ? https : http;
+            const body = JSON.stringify(payload || {});
+
+            const req = transport.request(
+                {
+                    protocol: target.protocol,
+                    hostname: target.hostname,
+                    port: target.port || (isHttps ? 443 : 80),
+                    path: `${target.pathname}${target.search || ''}`,
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Content-Length': Buffer.byteLength(body)
+                    },
+                    timeout: timeoutMs
+                },
+                (res) => {
+                    let raw = '';
+                    res.setEncoding('utf8');
+                    res.on('data', (chunk) => {
+                        raw += chunk;
+                    });
+                    res.on('end', () => {
+                        const statusCode = res.statusCode || 500;
+                        if (statusCode < 200 || statusCode >= 300) {
+                            return reject(new Error(`HTTP ${statusCode}: ${raw || 'Request failed'}`));
+                        }
+
+                        try {
+                            resolve(raw ? JSON.parse(raw) : {});
+                        } catch {
+                            resolve({ response: raw });
+                        }
+                    });
+                }
+            );
+
+            req.on('timeout', () => {
+                req.destroy(new Error(`Request timed out after ${timeoutMs}ms`));
+            });
+            req.on('error', reject);
+            req.write(body);
+            req.end();
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+async function chatWithOllama(message) {
+    const systemPrompt = "You are a friendly AI Resume Assistant for Stella Mary's College of Engineering. Help users with resume tips, interview prep, career guidance, and technical skills advice.";
+    const baseUrl = OLLAMA_BASE_URL.replace(/\/$/, '');
+
+    try {
+        const response = await postJson(
+            `${baseUrl}/api/chat`,
+            {
+                model: OLLAMA_MODEL,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: message }
+                ],
+                stream: false
+            },
+            OLLAMA_TIMEOUT_MS
+        );
+
+        const content = response?.message?.content || response?.response;
+        if (!content) {
+            throw new Error('Ollama returned empty response');
+        }
+
+        return content;
+    } catch (chatError) {
+        const errorMessage = chatError?.message || String(chatError);
+        if (!errorMessage.includes('404')) {
+            throw chatError;
+        }
+
+        const fallbackResponse = await postJson(
+            `${baseUrl}/api/generate`,
+            {
+                model: OLLAMA_MODEL,
+                prompt: `${systemPrompt}\n\nUser question: ${message}`,
+                stream: false
+            },
+            OLLAMA_TIMEOUT_MS
+        );
+
+        const fallbackContent = fallbackResponse?.response || fallbackResponse?.message?.content;
+        if (!fallbackContent) {
+            throw new Error('Ollama returned empty fallback response');
+        }
+
+        return fallbackContent;
+    }
+}
 
 // Storage configuration
 const storage = multer.diskStorage({
@@ -120,7 +240,7 @@ const upload = multer({
             cb(new Error('Invalid file type'), false);
         }
     },
-    limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+    limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit per file
 });
 
 // Check if API keys are configured
@@ -152,6 +272,8 @@ if (hasGoogleKey) {
 console.log('\n📋 API Configuration Status:');
 console.log(`   OpenAI API Key: ${hasOpenAIKey ? '✅ Configured' : '❌ Not Set'}`);
 console.log(`   Google API Key: ${hasGoogleKey ? '✅ Configured' : '❌ Not Set'}`);
+console.log(`   Ollama URL: ${OLLAMA_BASE_URL}`);
+console.log(`   Ollama Model: ${OLLAMA_MODEL}`);
 console.log(`   AI Service: ${process.env.AI_SERVICE || 'google'}\n`);
 
 // Store for analysis results (in production, use database)
@@ -204,6 +326,74 @@ async function extractTextFromResume(filePath) {
     }
 }
 
+function analyzeResumeLocally(resumeText, candidateName, fallbackReason = '') {
+    const text = (resumeText || '').toString();
+    const lowerText = text.toLowerCase();
+    const firstLine = text.split(/\r?\n/).map(line => line.trim()).find(Boolean) || '';
+
+    const inferredName = firstLine && firstLine.length <= 60 ? firstLine : candidateName;
+
+    const hasPhd = /\b(ph\.?d|doctorate)\b/i.test(text);
+    const hasME = /\b(m\.?e\.?|m\s*tech|master\s+of\s+engineering)\b/i.test(text);
+    const degree = hasPhd ? 'PhD' : hasME ? 'M.E' : 'Other';
+
+    const communicationPatterns = [
+        /communication/i,
+        /presentation/i,
+        /verbal/i,
+        /written/i,
+        /public\s+speaking/i,
+        /interpersonal/i
+    ];
+    const hasCommunicationSkills = communicationPatterns.some((pattern) => pattern.test(text));
+
+    const requiredSkills = ['Python', 'Java', 'C++', 'HTML', 'JavaScript', 'CSS'];
+    const technicalSkills = requiredSkills.filter((skill) => {
+        if (skill === 'C++') return lowerText.includes('c++');
+        return new RegExp(`\\b${skill.toLowerCase()}\\b`, 'i').test(text);
+    });
+
+    let score = 0.2;
+    score += degree === 'Other' ? 0.05 : 0.3;
+    score += hasCommunicationSkills ? 0.2 : 0;
+    score += (technicalSkills.length / requiredSkills.length) * 0.3;
+    score = Math.max(0, Math.min(1, score));
+
+    const approved = degree !== 'Other' && hasCommunicationSkills && technicalSkills.length >= 3;
+
+    const strengths = [];
+    const weaknesses = [];
+
+    if (degree !== 'Other') strengths.push(`Relevant degree detected: ${degree}`);
+    else weaknesses.push('Required M.E/PhD degree not clearly found');
+
+    if (hasCommunicationSkills) strengths.push('Communication/presentation indicators found');
+    else weaknesses.push('Communication skill evidence not found clearly');
+
+    if (technicalSkills.length > 0) strengths.push(`Technical skills found: ${technicalSkills.join(', ')}`);
+    if (technicalSkills.length < 3) weaknesses.push('Fewer than 3 required technical skills detected');
+
+    const assessment = approved
+        ? 'Resume meets core screening criteria based on local fallback analysis.'
+        : 'Resume does not fully meet screening criteria based on local fallback analysis.';
+
+    return {
+        candidateName: inferredName || candidateName || 'Candidate',
+        score,
+        degree,
+        hasCommunicationSkills,
+        technicalSkills,
+        strengths,
+        weaknesses,
+        assessment,
+        feedback: `${assessment}${fallbackReason ? ` (Fallback reason: ${fallbackReason})` : ''}`,
+        status: approved ? 'approved' : 'rejected',
+        recommendation: approved ? 'APPROVED' : 'REJECTED',
+        timestamp: new Date(),
+        fallbackUsed: true
+    };
+}
+
 // Analyze resume with OpenAI
 async function analyzeResumeWithAI(resumeText, candidateName) {
     try {
@@ -216,16 +406,16 @@ ${resumeText}
 REQUIRED CRITERIA:
 - Education: M.E or PhD degree (Computer Science preferred)
 - Communication Skills: MUST be present (written/verbal/presentation)
-- Technical Skills: Check for Python, Java, C++, HTML, JavaScript, CSS
+- Technical Skills: Check fohttp://localhost:3000r Python, Java, C++, HTML, JavaScript, CSS
 
 Please analyze this resume and provide:
 1. A brief assessment (2-3 sentences)
 2. A match score from 0 to 1 (0.0 to 1.0)
 3. Key strengths
 4. Key weaknesses
-5. Degree qualification (M.E, PhD, or Other)
+5. Degree qualification (B.E,M.E, PhD, or Other)
 6. Communication skills presence (Yes/No)
-7. Technical skills found (list from: Python, Java, C++, HTML, JavaScript, CSS)
+7. Technical skills found (list from: Python, Java, C++, HTML, JavaScript, CSS or other)
 8. Recommendation: "APPROVED" (pass to principal for final approval) or "REJECTED" (does not meet criteria)
 
 Format your response as JSON:
@@ -294,7 +484,7 @@ Format your response as JSON:
                     } else {
                         throw new Error('⚠️ Google Gemini quota exceeded and OpenAI is not configured. Please check your API keys.');
                     }
-                } else if (!process.env.OPENAI_KEY) {
+                } else if (!process.env.OPENAI_API_KEY) {
                     throw googleError;
                 } else {
                     // Try OpenAI as fallback
@@ -352,19 +542,25 @@ Format your response as JSON:
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
             const analysis = JSON.parse(jsonMatch[0]);
-            
+            const strengths = Array.isArray(analysis.strengths) ? analysis.strengths : [];
+            const weaknesses = Array.isArray(analysis.weaknesses) ? analysis.weaknesses : [];
+            const technicalSkills = Array.isArray(analysis.technicalSkills) ? analysis.technicalSkills : [];
+            const parsedScore = Number(analysis.score);
+            const score = Number.isFinite(parsedScore) ? Math.max(0, Math.min(1, parsedScore)) : 0.5;
+            const recommendation = String(analysis.recommendation || '').toUpperCase();
+
             return {
                 candidateName: analysis.candidateName || candidateName,
-                score: analysis.score || 0.5,
+                score,
                 degree: analysis.degree,
                 hasCommunicationSkills: analysis.hasCommunicationSkills,
-                technicalSkills: analysis.technicalSkills,
-                strengths: analysis.strengths || [],
-                weaknesses: analysis.weaknesses || [],
+                technicalSkills,
+                strengths,
+                weaknesses,
                 assessment: analysis.assessment || "",
-                feedback: `${analysis.assessment}\n\nStrengths: ${analysis.strengths.join(', ')}\nWeaknesses: ${analysis.weaknesses.join(', ')}`,
-                status: analysis.recommendation === "APPROVED" ? "approved" : "rejected",
-                recommendation: analysis.recommendation,
+                feedback: `${analysis.assessment || ''}\n\nStrengths: ${strengths.join(', ')}\nWeaknesses: ${weaknesses.join(', ')}`,
+                status: recommendation === "APPROVED" ? "approved" : "rejected",
+                recommendation: recommendation || "REJECTED",
                 timestamp: new Date()
             };
         }
@@ -383,13 +579,18 @@ Format your response as JSON:
             errorMsg = '⚠️ Invalid API key. Please update OPENAI_API_KEY or GOOGLE_API_KEY.';
         }
         
+        if (ALLOW_LOCAL_FALLBACK) {
+            console.warn('⚠️ AI unavailable, using local fallback analysis:', errorMsg);
+            return analyzeResumeLocally(resumeText, candidateName, errorMsg);
+        }
+
         console.error('⚠️ AI Analysis Error:', errorMsg);
         throw new Error(errorMsg);
     }
 }
 
 // Route wrapper with error handling
-app.post('/api/upload', upload.array('resumes', 10), asyncHandler(async (req, res) => {
+app.post('/api/upload', upload.array('resumes', 1000), asyncHandler(async (req, res) => {
     if (!req.files || req.files.length === 0) {
         return res.status(400).json({ 
             success: false, 
@@ -593,29 +794,45 @@ app.get('/api/stats', asyncHandler(async (req, res) => {
     });
 }));
 
-// Clear old uploads (cleanup)
+// Clear old uploads (cleanup) - but preserve analysis results
 app.post('/api/cleanup', asyncHandler(async (req, res) => {
     const uploadDir = path.join(__dirname, '../uploads');
-    const files = fs.readdirSync(uploadDir).filter(f => !f.startsWith('.'));
     
-    let deleted = 0;
-    files.forEach(file => {
-        const filePath = path.join(uploadDir, file);
-        try {
-            fs.unlinkSync(filePath);
-            deleted++;
-        } catch (err) {
-            console.error(`Error deleting ${file}:`, err);
-        }
-    });
+    // Check if directory exists
+    if (fs.existsSync(uploadDir)) {
+        const files = fs.readdirSync(uploadDir).filter(f => !f.startsWith('.'));
+        
+        let deleted = 0;
+        files.forEach(file => {
+            const filePath = path.join(uploadDir, file);
+            try {
+                fs.unlinkSync(filePath);
+                deleted++;
+            } catch (err) {
+                console.error(`Error deleting ${file}:`, err);
+            }
+        });
+        
+        console.log(`🧹 Cleaned up ${deleted} uploaded file(s). Preserved ${analysisDatabase.length} analysis result(s).`);
+        
+        res.json({
+            success: true,
+            message: `Cleaned up ${deleted} file(s). ${analysisDatabase.length} analysis result(s) preserved.`,
+            deleted: deleted,
+            resultsPreserved: analysisDatabase.length
+        });
+    } else {
+        // No uploads directory exists, just preserve results
+        res.json({
+            success: true,
+            message: `No files to clean. ${analysisDatabase.length} analysis result(s) preserved.`,
+            deleted: 0,
+            resultsPreserved: analysisDatabase.length
+        });
+    }
     
-    analysisDatabase = [];
-    
-    res.json({
-        success: true,
-        message: `Cleaned up ${deleted} file(s)`,
-        deleted: deleted
-    });
+    // NOTE: We intentionally do NOT clear analysisDatabase anymore
+    // The analysis results should persist even after uploaded files are cleaned up
 }));
 
 // Chat with AI chatbot endpoint
@@ -647,10 +864,14 @@ Be friendly, helpful, and concise. Use emoji where appropriate. Provide practica
 User question: ${message}`;
 
         let content;
-        const aiService = process.env.AI_SERVICE || 'google';
+        const aiService = (process.env.AI_SERVICE || 'google').toLowerCase();
 
+        if (aiService === 'ollama') {
+            console.log('🟠 Using Ollama for chat...');
+            content = await chatWithOllama(message);
+        }
         // Try Google Gemini first
-        if (aiService === 'google' && process.env.GOOGLE_API_KEY && model) {
+        else if (aiService === 'google' && process.env.GOOGLE_API_KEY && model) {
             try {
                 console.log('🔵 Using Google Gemini for chat...');
                 const result = await withTimeout(
@@ -689,10 +910,12 @@ User question: ${message}`;
                             );
                             content = response.choices[0].message.content;
                         } catch (openaiError) {
-                            throw new Error('AI services unavailable. Please try again later.');
+                            console.log('🟠 Trying Ollama fallback for chat...');
+                            content = await chatWithOllama(message);
                         }
                     } else {
-                        throw new Error('AI services not configured. Please check API keys.');
+                        console.log('🟠 Trying Ollama fallback for chat...');
+                        content = await chatWithOllama(message);
                     }
                 } else {
                     throw googleError;
@@ -721,8 +944,11 @@ User question: ${message}`;
                 'OpenAI chat request'
             );
             content = response.choices[0].message.content;
+        } else if (OLLAMA_BASE_URL) {
+            console.log('🟠 Falling back to Ollama for chat...');
+            content = await chatWithOllama(message);
         } else {
-            throw new Error('No AI service configured. Please set OPENAI_API_KEY or GOOGLE_API_KEY in .env file.');
+            throw new Error('No AI service configured. Set AI_SERVICE=ollama or configure OPENAI_API_KEY/GOOGLE_API_KEY in .env file.');
         }
 
         console.log(`✅ Chat response generated`);
@@ -752,7 +978,7 @@ app.use((err, req, res, next) => {
             return res.status(413).json({
                 success: false,
                 message: 'File too large',
-                error: 'Maximum file size is 10MB'
+                error: 'Maximum file size is 50MB'
             });
         }
     }

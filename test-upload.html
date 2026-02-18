@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Resume Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a202c;
+            color: #fff;
+        }
+        .test-box {
+            background: #2d3748;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        input[type="file"] {
+            margin: 10px 0;
+        }
+        button {
+            background: #4299e1;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #3182ce;
+        }
+        #results {
+            background: #2d3748;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+            min-height: 100px;
+        }
+        .result-item {
+            background: #1a202c;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 10px 0;
+            border-left: 4px solid #48bb78;
+        }
+        .log {
+            background: #1a202c;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 AI Resume System Test</h1>
+    
+    <div class="test-box">
+        <h2>Upload & Analyze Resume</h2>
+        <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.txt">
+        <button onclick="testUploadAnalyze()">Test Upload + Analyze</button>
+        
+        <div id="log" style="margin-top: 20px;"></div>
+    </div>
+
+    <div id="results"></div>
+
+    <script>
+        const API_URL = 'http://127.0.0.1:3000/api';
+        let analysisResults = [];
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            const color = type === 'error' ? '#f56565' : type === 'success' ? '#48bb78' : '#63b3ed';
+            logDiv.innerHTML += `<div class="log" style="color: ${color}">[${time}] ${message}</div>`;
+            console.log(message);
+        }
+
+        async function testUploadAnalyze() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                log('❌ Please select a file first!', 'error');
+                return;
+            }
+
+            log(`📤 Uploading: ${file.name}`, 'info');
+            
+            try {
+                // Step 1: Upload
+                const formData = new FormData();
+                formData.append('resumes', file);
+                
+                const uploadRes = await fetch(`${API_URL}/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const uploadData = await uploadRes.json();
+                log(`✅ Upload success: ${JSON.stringify(uploadData)}`, 'success');
+                
+                if (!uploadData.success) {
+                    log(`❌ Upload failed: ${uploadData.message}`, 'error');
+                    return;
+                }
+                
+                const fileId = uploadData.files[0].id;
+                log(`📋 File ID: ${fileId}`, 'info');
+                
+                // Step 2: Analyze
+                log(`🔄 Analyzing resume...`, 'info');
+                
+                const analyzeRes = await fetch(`${API_URL}/analyze`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fileId })
+                });
+                
+                log(`📥 Analyze response status: ${analyzeRes.status}`, 'info');
+                
+                const analyzeData = await analyzeRes.json();
+                log(`📊 Analyze response: ${JSON.stringify(analyzeData, null, 2)}`, 'success');
+                
+                if (!analyzeData.success) {
+                    log(`❌ Analysis failed: ${analyzeData.message}`, 'error');
+                    return;
+                }
+                
+                // Display result
+                const analysis = analyzeData.analysis;
+                analysisResults.push(analysis);
+                displayResults();
+                
+                log(`✅ ANALYSIS COMPLETE!`, 'success');
+                log(`   Candidate: ${analysis.candidateName}`, 'success');
+                log(`   Score: ${Math.round(analysis.score * 100)}%`, 'success');
+                log(`   Status: ${analysis.status}`, 'success');
+                
+            } catch (error) {
+                log(`❌ Error: ${error.message}`, 'error');
+                console.error('Full error:', error);
+            }
+        }
+
+        function displayResults() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<h2>📊 Analysis Results</h2>';
+            
+            if (analysisResults.length === 0) {
+                resultsDiv.innerHTML += '<p>No results yet</p>';
+                return;
+            }
+            
+            analysisResults.forEach(result => {
+                const scorePercentage = Math.round(result.score * 100);
+                const scoreColor = scorePercentage >= 70 ? '#48bb78' : scorePercentage >= 50 ? '#ed8936' : '#f56565';
+                
+                const html = `
+                    <div class="result-item">
+                        <h3>📋 ${result.candidateName || 'Candidate'}</h3>
+                        <div style="color: ${scoreColor}; font-size: 1.2em; font-weight: bold;">
+                            Score: ${scorePercentage}%
+                        </div>
+                        <div>Status: <strong>${result.status.toUpperCase()}</strong></div>
+                        <div>Degree: ${result.degree || 'N/A'}</div>
+                        <div>Communication Skills: ${result.hasCommunicationSkills ? '✓ Yes' : '✗ No'}</div>
+                        <div>Technical Skills: ${result.technicalSkills ? result.technicalSkills.join(', ') : 'N/A'}</div>
+                        <div style="margin-top: 10px;"><strong>Assessment:</strong> ${result.assessment || 'N/A'}</div>
+                    </div>
+                `;
+                resultsDiv.innerHTML += html;
+            });
+        }
+    </script>
+</body>
+</html>

@@ -640,8 +640,11 @@
                 <h2>📊 Analysis Results</h2>
                 
                 <div id="messageContainer"></div>
+                
+                <!-- Debug: Show results count -->
+                <div id="debugInfo" style="background: #2d3748; padding: 10px; border-radius: 6px; margin-bottom: 10px; color: #63b3ed; font-family: monospace; font-size: 14px;"></div>
 
-                <div class="analysis-results" id="resultsContainer">
+                <div class="analysis-results" id="resultsContainer" style="min-height: 100px; border: 2px solid rgba(66, 153, 225, 0.3);">
                     <p style="color: #999; text-align: center; padding: 20px;">
                         Upload resumes to see analysis results here
                     </p>
@@ -761,7 +764,7 @@
                     </div>
                 </div>
                 <div class="chat-info">
-                    <h3>AI Resume Assistant</h3>
+                    <h3>HEIR</h3>
                     <span class="status-dot"></span> Online
                 </div>
                 <button class="close-chat" onclick="closeModernChat()">×</button>
@@ -775,7 +778,7 @@
                         </div>
                     </div>
                     <div class="message-bubble bot-bubble">
-                        <p>Hello! 👋 I'm your AI Resume Assistant</p>
+                        <p>Hello! 👋 I'm HEIR, your AI Assistant</p>
                         <p>I can help you with:</p>
                         <ul>
                             <li>📝 Resume tips & tricks</li>
@@ -1240,9 +1243,26 @@
     </style>
 
     <script>
-        const API_URL = 'http://localhost:3000/api';
+        const API_URL = (() => {
+            const host = window.location.hostname;
+            const port = window.location.port;
+
+            // If UI is served by backend itself, use same-origin API to avoid CORS.
+            if ((host === 'localhost' || host === '127.0.0.1') && port === '3000') {
+                return '/api';
+            }
+
+            // For Live Server / other local dev ports, target backend on 3000.
+            if (host === 'localhost' || host === '127.0.0.1') {
+                return `http://${host}:3000/api`;
+            }
+
+            // Fallback for unexpected hosts.
+            return 'http://localhost:3000/api';
+        })();
         let uploadedFiles = [];
         let analysisResults = [];
+        let connectionErrorVisible = false;
 
         // Modern Chat Functions
         function showModernChat() {
@@ -1324,29 +1344,248 @@
             }, 600);
         }
 
-        function getBotResponse(message) {
-            const msg = message.toLowerCase();
-            if (msg.includes('feedback') || msg.includes('improve') || msg.includes('improvement')) {
-                return `<p>💡 Resume Improvement Suggestions:</p><ul><li>📊 <strong>Add Metrics:</strong> Replace vague descriptions with quantified achievements (e.g., "Increased sales by 25%")</li><li>🎯 <strong>Match Keywords:</strong> Include keywords from job description to improve relevance</li><li>💼 <strong>Use Action Verbs:</strong> Start bullet points with power words (Led, Designed, Developed, Managed)</li><li>📚 <strong>Highlight Skills Required:</strong> Emphasize Python, Java, C++, HTML, JavaScript, CSS based on role</li><li>🎓 <strong>Strengthen Education:</strong> Clearly state M.E/PhD degree and relevant coursework</li><li>💬 <strong>Communication:</strong> Add examples of written, verbal, or presentation skills</li><li>✅ <strong>Proofread:</strong> Check for spelling, grammar, and formatting errors</li></ul>`;
-            } else if (msg.includes('tip') || msg.includes('resume')) {
-                return `<p>Here are some resume tips:</p><ul><li>📝 Keep it concise - 1-2 pages max</li><li>✨ Use action verbs and quantify achievements</li><li>🎯 Tailor your resume to the job description</li><li>✅ Proofread for errors</li></ul>`;
-            } else if (msg.includes('100%') || msg.includes('score')) {
-                return `<p>To score 100% on your resume:</p><ul><li>💯 Complete all required fields</li><li>📊 Include quantifiable achievements</li><li>🎓 Add relevant certifications</li><li>💼 Include strong action verbs</li><li>✅ Ensure no grammatical errors</li></ul>`;
-            } else if (msg.includes('interview')) {
-                return `<p>Interview preparation tips:</p><ul><li>🎤 Practice common questions</li><li>📚 Research the company</li><li>💬 Prepare your own questions</li><li>👔 Dress professionally</li><li>😊 Show enthusiasm</li></ul>`;
-            } else if (msg.includes('skill')) {
-                return `<p>Important skills to highlight:</p><ul><li>💻 Technical skills (programming, tools)</li><li>🧠 Problem-solving abilities</li><li>👥 Communication skills</li><li>📅 Time management</li><li>🤝 Teamwork</li></ul>`;
+        // Local resume analysis function for HEIR chatbot
+        function analyzeResumeLocally(resumeText) {
+            const text = (resumeText || '').toString();
+            const lowerText = text.toLowerCase();
+            
+            if (!text || text.trim().length < 20) {
+                return null;
             }
-            return `<p>I'm here to help! Ask me about:</p><ul><li>💡 Resume tips</li><li>💯 How to score 100%</li><li>🎤 Interview prep</li><li>💻 Skills to highlight</li><li>📊 Feedback & improvements</li></ul>`;
+            
+            // Extract candidate name (first non-empty line)
+            const firstLine = text.split(/\r?\n/).map(line => line.trim()).find(Boolean) || '';
+            const candidateName = firstLine && firstLine.length <= 60 ? firstLine : 'Candidate';
+            
+            // Check for education
+            const hasPhd = /\b(ph\.?d|doctorate|phd)\b/i.test(text);
+            const hasME = /\b(m\.?e\.?|m\s*tech|master\s+of\s+engineering|b\.?e\.?|bachelor)\b/i.test(text);
+            const hasBtech = /\b(b\.?tech|bachelor\s+of\s+technology)\b/i.test(text);
+            const degree = hasPhd ? 'PhD' : hasME ? 'M.E/B.E' : hasBtech ? 'B.Tech' : 'Other';
+            
+            // Check for communication skills
+            const communicationPatterns = [
+                /communication/i, /presentation/i, /verbal/i, /written/i,
+                /public\s+speaking/i, /interpersonal/i, /leadership/i,
+                /teamwork/i, /collaboration/i, /negotiation/i
+            ];
+            const hasCommunicationSkills = communicationPatterns.some(pattern => pattern.test(text));
+            
+            // Check for technical skills
+            const requiredSkills = [
+                { name: 'Python', pattern: /\bpython\b/i },
+                { name: 'Java', pattern: /\bjava\b(?!script)/i },
+                { name: 'C++', pattern: /\bc\+\+\b/i },
+                { name: 'HTML', pattern: /\bhtml\b/i },
+                { name: 'JavaScript', pattern: /\bjavascript\b|\bjs\b/i },
+                { name: 'CSS', pattern: /\bcss\b/i },
+                { name: 'SQL', pattern: /\bsql\b/i },
+                { name: 'React', pattern: /\breact\b/i },
+                { name: 'Node.js', pattern: /\bnode\.?js\b/i },
+                { name: 'Machine Learning', pattern: /\bmachine\s+learning\b|\bml\b/i },
+                { name: 'Data Analysis', pattern: /\bdata\s+analysis\b|\bdata\s+science\b/i },
+                { name: 'Cloud', pattern: /\baws\b|\bazure\b|\bgcp\b|\bcloud\b/i },
+                { name: 'Git', pattern: /\bgit\b/i },
+                { name: 'Docker', pattern: /\bdocker\b/i },
+                { name: 'AI', pattern: /\bartificial\s+intelligence\b|\bai\b/i }
+            ];
+            
+            const technicalSkills = requiredSkills.filter(skill => skill.pattern.test(text)).map(s => s.name);
+            
+            // Calculate score
+            let score = 0.2;
+            if (degree !== 'Other') score += 0.25;
+            if (hasCommunicationSkills) score += 0.2;
+            score += Math.min(0.35, (technicalSkills.length / 8) * 0.35);
+            score = Math.max(0, Math.min(1, score));
+            
+            // Determine strengths
+            const strengths = [];
+            if (degree !== 'Other') strengths.push(`✅ Relevant education: ${degree} degree found`);
+            if (hasCommunicationSkills) strengths.push('✅ Good communication/soft skills mentioned');
+            if (technicalSkills.length >= 3) strengths.push(`✅ Strong technical skills: ${technicalSkills.slice(0, 5).join(', ')}`);
+            if (technicalSkills.length >= 5) strengths.push('✅ Highly skilled in multiple technologies');
+            
+            // Determine weaknesses/improvements
+            const improvements = [];
+            if (degree === 'Other') improvements.push('⚠️ Consider adding your M.E/B.E/PhD degree clearly');
+            if (!hasCommunicationSkills) improvements.push('⚠️ Add communication/leadership skills section');
+            if (technicalSkills.length < 3) improvements.push('⚠️ Highlight more technical skills (Python, Java, C++, HTML, JS, etc.)');
+            if (!/\bproject\b/i.test(text)) improvements.push('⚠️ Add a projects section to showcase practical experience');
+            if (!/\binternship\b/i.test(text) && !/\bexperience\b/i.test(text)) improvements.push('⚠️ Add work experience or internships');
+            if (!/\bcertificat/i.test(text)) improvements.push('💡 Consider adding relevant certifications');
+            
+            return {
+                candidateName: candidateName,
+                score: score,
+                degree: degree,
+                hasCommunicationSkills: hasCommunicationSkills,
+                technicalSkills: technicalSkills,
+                strengths: strengths,
+                improvements: improvements,
+                analysis: 'Local resume analysis by HEIR'
+            };
+        }
+        
+        // Check if message contains resume content
+        function containsResumeContent(msg) {
+            const resumeIndicators = [
+                /education/i, /degree/i, /b\.?e\.?/i, /b\.?tech/i, /m\.?e\.?/i, /m\.?tech/i, /ph\.?d/i,
+                /experience/i, /internship/i, /project/i, /skills/i, /python/i, /java/i, /c\+\+/i,
+                /html/i, /css/i, /javascript/i, /work\s+history/i, /employment/i, /certificat/i,
+                /technology/i, /engineering/i, /computer\s+science/i
+            ];
+            return resumeIndicators.some(pattern => pattern.test(msg));
+        }
+        
+        function getBotResponse(message, fullMessage = '') {
+            const msg = message.toLowerCase();
+            const fullText = (fullMessage || message).toLowerCase();
+            
+            // Check if user is sharing resume content or asking to analyze resume
+            const isResumeContent = containsResumeContent(msg) || fullText.length > 200;
+            const wantsAnalysis = msg.includes('analyze') || msg.includes('review') || msg.includes('feedback') || 
+                                msg.includes('check') || msg.includes('improve') || msg.includes('look at') ||
+                                msg.includes('my resume') || msg.includes('this resume') || msg.includes('paste');
+            
+            // If user shares resume content or asks for analysis, analyze it
+            if (isResumeContent && (wantsAnalysis || fullText.length > 300)) {
+                const analysis = analyzeResumeLocally(fullMessage || message);
+                
+                if (analysis) {
+                    const scorePct = Math.round(analysis.score * 100);
+                    const scoreColor = scorePct >= 70 ? '#22c55e' : scorePct >= 50 ? '#f59e0b' : '#ef4444';
+                    
+                    return `<p>📋 <strong>Resume Analysis by HEIR</strong></p>
+<p><strong>Candidate:</strong> ${analysis.candidateName}</p>
+<p><strong>📊 Score:</strong> <span style="color: ${scoreColor}; font-size: 1.2em;"><strong>${scorePct}%</strong></span></p>
+<p><strong>🎓 Education:</strong> ${analysis.degree}</p>
+<p><strong>💬 Communication Skills:</strong> ${analysis.hasCommunicationSkills ? '✅ Found' : '⚠️ Not clearly mentioned'}</p>
+${analysis.technicalSkills.length > 0 ? `<p><strong>💻 Technical Skills (${analysis.technicalSkills.length}):</strong> ${analysis.technicalSkills.join(', ')}</p>` : ''}
+<hr style="border: 0.5px solid #444; margin: 10px 0;">
+<p><strong>✅ STRENGTHS:</strong></p>
+${analysis.strengths.length > 0 ? `<ul>${analysis.strengths.map(s => `<li>${s}</li>`).join('')}</ul>` : '<p>No specific strengths found</p>'}
+<p><strong>💡 IMPROVEMENTS:</strong></p>
+${analysis.improvements.length > 0 ? `<ul>${analysis.improvements.map(i => `<li>${i}</li>`).join('')}</ul>` : '<p>Your resume looks great! Keep it up!</p>'}
+<p style="margin-top: 10px; padding: 10px; background: rgba(99, 102, 241, 0.1); border-radius: 5px;">
+<strong>💯 Tips to Improve Score:</strong><br>
+• Add M.E/B.E/PhD degree clearly<br>
+• Include more technical skills (Python, Java, C++, HTML, JS)<br>
+• Add communication/leadership skills<br>
+• Include projects and certifications
+</p>`;
+                }
+            }
+            
+            // HEIR responds to all questions with helpful answers
+            // For resume-related queries, provide specific advice
+            if (msg.includes('resume') || msg.includes('cv') || msg.includes('application')) {
+                return `<p>📝 Resume Tips from HEIR:</p><ul><li>📊 <strong>Quantify Achievements:</strong> Use numbers (e.g., "Increased sales by 25%")</li><li>🎯 <strong>Match Keywords:</strong> Include job description keywords</li><li>💼 <strong>Action Verbs:</strong> Start bullet points with (Led, Designed, Developed, Managed)</li><li>📚 <strong>Highlight Skills:</strong> Python, Java, C++, HTML, JavaScript, CSS</li><li>🎓 <strong>Education:</strong> Clearly state M.E/PhD degree</li><li>💬 <strong>Communication:</strong> Add written/verbal skills examples</li><li>✅ <strong>Proofread:</strong> Check spelling and grammar</li></ul><p>💡 <strong>Want me to analyze your resume?</strong> Just paste your resume text here and I'll give you feedback!</p>`;
+            } else if (msg.includes('interview') || msg.includes('interview')) {
+                return `<p>🎤 Interview Tips from HEIR:</p><ul><li>🎤 <strong>Practice:</strong> Rehearse common questions</li><li>📚 <strong>Research:</strong> Know the company thoroughly</li><li>💬 <strong>Questions:</strong> Prepare thoughtful questions</li><li>👔 <strong>Dress:</strong> Professional attire matters</li><li>😊 <strong>Enthusiasm:</strong> Show genuine interest</li><li>🤝 <strong>Follow-up:</strong> Send thank-you notes</li></ul>`;
+            } else if (msg.includes('skill') || msg.includes('technical')) {
+                return `<p>💻 Technical Skills from HEIR:</p><ul><li>🐍 <strong>Python:</strong> Data analysis, ML, web dev</li><li>☕ <strong>Java:</strong> OOP, Android, enterprise apps</li><li>➕ <strong>C++:</strong> Systems programming, games</li><li>🌐 <strong>HTML/CSS:</strong> Web development</li><li>📱 <strong>JavaScript:</strong> Frontend & backend</li><li>🧠 <strong>Problem-solving:</strong> Critical thinking</li><li>👥 <strong>Communication:</strong> Written & verbal</li></ul>`;
+            } else if (msg.includes('100%') || msg.includes('score') || msg.includes('percentage')) {
+                return `<p>💯 How to Score 100% - HEIR's Guide:</p><ul><li>✅ <strong>Complete Fields:</strong> Fill all required sections</li><li>📊 <strong>Metrics:</strong> Include quantifiable achievements</li><li>🎓 <strong>Education:</strong> M.E/PhD clearly stated</li><li>💼 <strong>Action Verbs:</strong> Use powerful verbs</li><li>🔍 <strong>Keywords:</strong> Match job description</li><li>✅ <strong>No Errors:</strong> Perfect spelling & grammar</li><li>💬 <strong>Communication:</strong> Highlight soft skills</li></ul>`;
+            } else if (msg.includes('job') || msg.includes('career') || msg.includes('employment')) {
+                return `<p>💼 Career Tips from HEIR:</p><ul><li>🎯 <strong>Goal Setting:</strong> Define your career objectives</li><li>📚 <strong>Continuous Learning:</strong> Stay updated with trends</li><li>🌐 <strong>Networking:</strong> Build professional connections</li><li>💻 <strong>Portfolio:</strong> Showcase your projects</li><li>📝 <strong>Resume:</strong> Keep it updated & tailored</li><li>🎤 <strong>Interview:</strong> Practice & prepare</li><li>💪 <strong>Skills:</strong> Develop both technical & soft skills</li></ul>`;
+            } else if (msg.includes('hello') || msg.includes('hi') || msg.includes('hey') || msg.includes('greeting')) {
+                return `<p>👋 Hello! I'm HEIR, your AI Assistant!</p><p>I can help you with:</p><ul><li>📝 Resume writing & improvements</li><li>💯 How to score 100% on applications</li><li>🎤 Interview preparation</li><li>💼 Career guidance</li><li>💻 Technical skills advice</li><li>📊 <strong>Analyze your resume</strong> - Just paste it!</li></ul><p>What would you like to know about? 😊</p>`;
+            } else if (msg.includes('thank')) {
+                return `<p>😊 You're welcome! Happy to help, HEIR at your service!</p><p>Feel free to ask more questions anytime!</p>`;
+            } else if (msg.includes('who') && (msg.includes('you') || msg.includes('are'))) {
+                return `<p>👋 I'm HEIR - Your AI Assistant!</p><p>I'm here to help you with:</p><ul><li>📝 Resume writing tips & improvements</li><li>💯 How to score 100% on screening</li><li>🎤 Interview preparation</li><li>💼 Career guidance</li><li>💻 Technical skills (Python, Java, C++, etc.)</li><li>📊 <strong>Analyze your resume</strong> - Just paste it!</li></ul><p>Ask me anything! 😊</p>`;
+            } else if (msg.includes('help')) {
+                return `<p>🆘 I'm HEIR and I'm here to help! Here's what I can assist you with:</p><ul><li>📝 <strong>Resume Tips:</strong> How to write a great resume</li><li>📊 <strong>Analyze Resume:</strong> Paste your resume and get feedback</li><li>💯 <strong>Scoring 100%:</strong> Tips to maximize your score</li><li>🎤 <strong>Interview Prep:</strong> Prepare for success</li><li>💼 <strong>Career Advice:</strong> Career guidance & planning</li><li>💻 <strong>Technical Skills:</strong> Programming & tech advice</li></ul><p>Just ask me anything! 😊</p>`;
+            } else if (msg.includes('name')) {
+                return `<p>👋 My name is HEIR! Your friendly AI Assistant 😄</p><p>I specialize in helping with:</p><ul><li>📝 Resume writing & analysis</li><li>💼 Career guidance</li><li>🎤 Interview prep</li><li>💻 Technical skills</li></ul><p><strong>Want me to analyze your resume?</strong> Just paste it here! 😊</p>`;
+            } else if (msg.includes('analyze') || msg.includes('review') || msg.includes('feedback') || msg.includes('check my resume') || msg.includes('my resume')) {
+                return `<p>📋 Sure! I'd be happy to analyze your resume!</p><p><strong>Please paste your resume text here</strong> and I'll provide:</p><ul><li>📊 A score based on key factors</li><li>✅ What's good in your resume</li><li>💡 What can be improved</li><li>💯 Tips to score 100%</li></ul><p>Paste your resume now! 😊</p>`;
+            } else {
+                // HEIR responds to ALL other questions with a general helpful response
+                return `<p>💡 Thanks for your question! Here's some advice from HEIR:</p><ul><li>📝 <strong>Resume:</strong> Keep it concise, use action verbs, quantify achievements</li><li>💼 <strong>Career:</strong> Set clear goals, keep learning, network</li><li>🎤 <strong>Interview:</strong> Practice, research company, be confident</li><li>💻 <strong>Skills:</strong> Python, Java, C++, HTML, JS, CSS + communication</li><li>📊 <strong>Success:</strong> Combine technical + soft skills</li></ul><p>💡 <strong>Want me to analyze your resume?</strong> Just paste it here and I'll give you detailed feedback!</p><p>Feel free to ask more specific questions! 😊</p>`;
+            }
+        }
+
+        async function loadExistingResults(options = {}) {
+            const { silent = true } = options;
+            try {
+                const response = await fetch(`${API_URL}/results`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: Could not fetch previous results`);
+                }
+
+                const data = await response.json();
+                if (!data?.success || !Array.isArray(data.results)) {
+                    return;
+                }
+
+                const serverResults = data.results
+                    .map(item => item?.analysis)
+                    .filter(Boolean);
+
+                const uploadedFromResults = data.results.map(item => ({
+                    id: item.fileId,
+                    name: item.fileName,
+                    status: item.analysis?.status || 'rejected',
+                    score: typeof item.analysis?.score === 'number' ? item.analysis.score : 0,
+                    analysis: item.analysis || null
+                }));
+
+                const pendingLocalFiles = uploadedFiles.filter(file =>
+                    file && (file.status === 'processing' || file.status === 'uploaded')
+                );
+
+                const serverFileIds = new Set(uploadedFromResults.map(file => file.id));
+                const pendingOnlyLocal = pendingLocalFiles.filter(file => !serverFileIds.has(file.id));
+
+                analysisResults = serverResults;
+                uploadedFiles = [...uploadedFromResults, ...pendingOnlyLocal];
+
+                updateFileList();
+                displayResults();
+                updateAllStats();
+
+                if (!silent && analysisResults.length > 0) {
+                    showMessage(`📋 Loaded ${analysisResults.length} previous result(s)`, 'info');
+                }
+            } catch (error) {
+                console.warn('Could not load existing results:', error.message);
+            }
+        }
+
+        async function cleanupOldResumesOnce() {
+            try {
+                const cleanupKey = 'resumeCleanupDoneOnce';
+                if (sessionStorage.getItem(cleanupKey) === 'true') {
+                    return;
+                }
+                // Keep compatibility key, but do not auto-call server cleanup.
+                sessionStorage.setItem(cleanupKey, 'true');
+            } catch (error) {
+                console.warn('One-time cleanup failed:', error.message);
+            }
         }
 
         // Initialize system
-        window.addEventListener('load', () => {
+        window.addEventListener('load', async () => {
             console.log('🚀 Resume Screening System Loaded');
-            checkSystemHealth();
+            await checkSystemHealth();
+            await cleanupOldResumesOnce();
+            await loadExistingResults({ silent: false });
             updateAllStats();
             // Refresh stats every 5 seconds
             setInterval(updateAllStats, 5000);
+            // Re-check backend health so UI recovers automatically
+            setInterval(checkSystemHealth, 30000);
+            // Ultra-fast sync (200ms) for real-time updates - no rate limits
+            setInterval(() => {
+                loadExistingResults({ silent: true });
+            }, 200);
         });
 
         // Check system health
@@ -1356,11 +1595,19 @@
                     method: 'GET',
                     headers: { 'Accept': 'application/json' }
                 });
+
+                if (response.status === 429) {
+                    hideConnectionErrorMessage();
+                    console.warn('⚠️ Health endpoint rate-limited, but backend is reachable.');
+                    return true;
+                }
+
                 if (response.ok) {
                     const data = await response.json();
                     if (data.success) {
                         console.log('✅ System Status: Online');
                         console.log(`📊 Uptime: ${Math.round(data.uptime)}s`);
+                        hideConnectionErrorMessage();
                         return true;
                     }
                 }
@@ -1372,7 +1619,12 @@
         }
 
         function showConnectionErrorMessage() {
+            if (connectionErrorVisible || document.getElementById('connectionErrorOverlay')) {
+                return;
+            }
+
             const errorDiv = document.createElement('div');
+            errorDiv.id = 'connectionErrorOverlay';
             errorDiv.style.cssText = `
                 position: fixed;
                 top: 0;
@@ -1448,6 +1700,15 @@
             `;
             
             document.body.appendChild(errorDiv);
+            connectionErrorVisible = true;
+        }
+
+        function hideConnectionErrorMessage() {
+            const errorDiv = document.getElementById('connectionErrorOverlay');
+            if (errorDiv) {
+                errorDiv.remove();
+            }
+            connectionErrorVisible = false;
         }
 
         // File upload handlers
@@ -1491,8 +1752,8 @@
                     continue;
                 }
                 
-                if (file.size > 10 * 1024 * 1024) {
-                    showMessage(`❌ File too large: ${file.name}. Max 10MB`, 'error');
+                if (file.size > 50 * 1024 * 1024) {
+                    showMessage(`❌ File too large: ${file.name}. Max 50MB`, 'error');
                     continue;
                 }
                 
@@ -1542,68 +1803,88 @@
             .catch(err => {
                 console.error('Upload error:', err);
                 if (err.message.includes('Failed to fetch') || err.message.includes('ERR_')) {
-                    showMessage(`❌ Connection Error: Cannot reach server at ${API_URL}. Is it running? Run: npm start`, 'error');
+                    showMessage(`❌ Connection Error: Cannot reach backend at ${API_URL}. Start backend with: npm start`, 'error');
                 } else {
                     showMessage(`❌ Upload error: ${err.message}`, 'error');
                 }
             });
         }
 
-        function analyzeResumes(files) {
-            files.forEach(file => {
-                const fileId = file.id;
-                
-                showMessage('🔄 AI analyzing resumes...', 'info');
+        async function analyzeResumes(files) {
+            if (!files || files.length === 0) return;
 
-                fetch(`${API_URL}/analyze`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fileId })
-                })
-                .then(res => {
-                    if (!res.ok) throw new Error(`HTTP ${res.status}: Analysis failed`);
-                    return res.json();
-                })
-                .then(data => {
-                    if (data.success) {
+            showMessage(`🔄 AI analyzing ${files.length} resume(s)...`, 'info');
+
+            for (const file of files) {
+                const fileId = file.id;
+
+                try {
+                    console.log('🔍 Analyzing file:', fileId);
+                    const res = await fetch(`${API_URL}/analyze`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ fileId })
+                    });
+
+                    console.log('📥 Response status:', res.status);
+                    const data = await res.json().catch(() => ({}));
+                    console.log('📊 Response data:', data);
+                    
+                    if (!res.ok) {
+                        throw new Error(data.message || data.error || `HTTP ${res.status}: Analysis failed`);
+                    }
+
+                    if (data.success && data.analysis) {
                         const result = data.analysis;
+                        console.log('✅ Analysis result:', result);
                         analysisResults.push(result);
-                        
-                        // Update file status
+                        console.log('📋 Total results now:', analysisResults.length);
+
                         const uploadedFile = uploadedFiles.find(f => f.id === fileId);
                         if (uploadedFile) {
-                            uploadedFile.status = result.status;
-                            uploadedFile.score = result.score;
+                            uploadedFile.status = result.status || 'rejected';
+                            uploadedFile.score = typeof result.score === 'number' ? result.score : 0;
                             uploadedFile.analysis = result;
                         }
 
                         updateFileList();
                         displayResults();
                         updateAllStats();
+                        await loadExistingResults({ silent: true });
+
+                        // Scroll to results section
+                        resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+                        const scorePct = Math.round((typeof result.score === 'number' ? result.score : 0) * 100);
+                        const candidateName = result.candidateName || 'Candidate';
+                        console.log(`✅ Displaying result for ${candidateName}: ${scorePct}%`);
                         
                         if (result.status === 'approved') {
-                            showMessage(`✅ ${result.candidateName} approved (Score: ${Math.round(result.score * 100)}%)`, 'success');
-                        } else if (result.status === 'rejected') {
-                            showMessage(`❌ ${result.candidateName} rejected (Score: ${Math.round(result.score * 100)}%)`, 'error');
+                            showMessage(`✅ ${candidateName} approved (Score: ${scorePct}%)`, 'success');
+                        } else {
+                            showMessage(`❌ ${candidateName} rejected (Score: ${scorePct}%)`, 'error');
                         }
                     } else {
-                        showMessage(`⚠️ Analysis failed: ${data.message || data.error}`, 'error');
+                        console.error('❌ Invalid response:', data);
+                        throw new Error(data.message || data.error || 'Invalid analysis response from server');
                     }
-                })
-                .catch(err => {
-                    console.error('Analysis error:', err);
+                } catch (err) {
+                    console.error('❌ Analysis error:', err);
+                    console.error('Full error object:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
                     const uploadedFile = uploadedFiles.find(f => f.id === fileId);
                     if (uploadedFile) {
                         uploadedFile.status = 'rejected';
                         updateFileList();
                     }
-                    if (err.message.includes('Failed to fetch') || err.message.includes('ERR_')) {
-                        showMessage(`❌ Server connection error. Check if server is running at ${API_URL}`, 'error');
+
+                    const message = err?.message || 'Unknown error';
+                    if (message.includes('Failed to fetch') || message.includes('ERR_')) {
+                        showMessage(`❌ Server connection error. Backend expected at ${API_URL}. Ensure npm start is running.`, 'error');
                     } else {
-                        showMessage(`❌ Analysis error: ${err.message}`, 'error');
+                        showMessage(`❌ Analysis error: ${message}`, 'error');
                     }
-                });
-            });
+                }
+            }
         }
 
         function updateFileList() {
@@ -1634,26 +1915,74 @@
         }
 
         function displayResults() {
+            console.log('📊 displayResults() called - Total results:', analysisResults.length);
+            
+            // Update debug info
+            const debugDiv = document.getElementById('debugInfo');
+            if (debugDiv) {
+                debugDiv.innerHTML = `🔍 DEBUG: displayResults() called | Results: ${analysisResults.length} | Time: ${new Date().toLocaleTimeString()}`;
+            }
+            
+            // Clear container
             resultsContainer.innerHTML = '';
+            resultsContainer.style.display = 'block';
+            resultsContainer.style.visibility = 'visible';
+            resultsContainer.style.opacity = '1';
 
             if (analysisResults.length === 0) {
                 resultsContainer.innerHTML = '<p style="color: #999; text-align: center; padding: 20px;">No analysis results yet</p>';
+                console.log('⚠️ No results to display');
                 return;
             }
 
+            console.log('✅ Rendering', analysisResults.length, 'result(s)...');
+            
+            // Add HUGE success banner
+            const successBanner = document.createElement('div');
+            successBanner.style.cssText = `
+                background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+                color: white;
+                padding: 20px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+                text-align: center;
+                font-size: 1.5em;
+                font-weight: bold;
+                box-shadow: 0 4px 12px rgba(72, 187, 120, 0.3);
+                border: 3px solid #48bb78;
+            `;
+            successBanner.innerHTML = `✅ ${analysisResults.length} RESULT(S) FOUND - SEE BELOW`;
+            resultsContainer.appendChild(successBanner);
+            
             analysisResults.forEach((result, index) => {
+                console.log(`  Rendering result ${index + 1}:`, result.candidateName, '-', result.score);
                 const div = document.createElement('div');
-                div.className = `result-item ${result.status}`;
+                const status = result.status || 'rejected';
+                div.className = `result-item ${status}`;
                 
-                const scorePercentage = Math.round(result.score * 100);
-                const scoreColor = scorePercentage >= 70 ? '#28a745' : scorePercentage >= 50 ? '#ffa500' : '#dc3545';
+                // Force visibility with inline styles
+                div.style.cssText = `
+                    display: block !important;
+                    visibility: visible !important;
+                    opacity: 1 !important;
+                    background: ${status === 'approved' ? '#2d3748' : '#2d3748'};
+                    border-left: 5px solid ${status === 'approved' ? '#48bb78' : '#f56565'};
+                    padding: 20px;
+                    margin: 15px 0;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                `;
+                
+                const safeScore = typeof result.score === 'number' ? result.score : 0;
+                const scorePercentage = Math.round(safeScore * 100);
+                const scoreColor = scorePercentage >= 70 ? '#48bb78' : scorePercentage >= 50 ? '#ffa500' : '#f56565';
                 
                 div.innerHTML = `
-                    <div class="result-title">📋 ${result.candidateName}</div>
+                    <div class="result-title">📋 ${result.candidateName || 'Candidate'}</div>
                     <div class="result-score" style="color: ${scoreColor}; font-size: 1.1em; margin-bottom: 10px;">
                         Match Score: <strong>${scorePercentage}%</strong>
                     </div>
-                    <div class="result-score">Status: <strong>${result.status.toUpperCase()}</strong></div>
+                    <div class="result-score">Status: <strong>${status.toUpperCase()}</strong></div>
                     ${result.degree ? `<div class="result-score">🎓 <strong>Degree:</strong> ${result.degree}</div>` : ''}
                     ${result.hasCommunicationSkills !== undefined ? `<div class="result-score">💬 <strong>Communication Skills:</strong> ${result.hasCommunicationSkills ? '✓ Present' : '✗ Not found'}</div>` : ''}
                     ${result.technicalSkills && result.technicalSkills.length > 0 ? `<div class="result-score" style="margin-bottom: 10px;">💻 <strong>Tech Skills:</strong> ${result.technicalSkills.join(', ')}</div>` : ''}
@@ -1661,14 +1990,20 @@
                     <div class="result-score" style="margin-bottom: 10px;"><strong>Weaknesses:</strong> ${Array.isArray(result.weaknesses) && result.weaknesses.length > 0 ? result.weaknesses.join(', ') : 'N/A'}</div>
                     <div class="result-feedback">${result.feedback || result.assessment || 'No detailed feedback available.'}</div>
                     <div class="action-buttons">
-                        ${result.status === 'approved' ? `
+                        ${status === 'approved' ? `
                             <button class="btn-small btn-send" onclick="sendForApproval(${index})">📧 Send to Principal</button>
                         ` : ''}
                         <button class="btn-small btn-reject" onclick="deleteResult(${index})">🗑️ Delete</button>
                     </div>
                 `;
                 resultsContainer.appendChild(div);
+                console.log(`  ✅ Result ${index + 1} appended to DOM`);
             });
+            
+            console.log(`✅ displayResults() complete. Total elements in container:`, resultsContainer.children.length);
+            
+            // Scroll to results
+            resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
 
         function sendForApproval(index) {
@@ -1922,5 +2257,4 @@ Stella Mary's College of Engineering
     </footer>
 
 </body>
-</html>
 </html>
