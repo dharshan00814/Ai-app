@@ -45,7 +45,8 @@ const allowedOrigins = new Set([
     'http://localhost:3001',
     'http://localhost:5500',
     'http://127.0.0.1:3000',
-    'http://127.0.0.1:5500'
+    'http://127.0.0.1:5500',
+    'https://dharshan00814.github.io'
 ]);
 
 const isAllowedLocalOrigin = (origin) => {
@@ -53,14 +54,19 @@ const isAllowedLocalOrigin = (origin) => {
     return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
 };
 
+const isAllowedHostedOrigin = (origin) => {
+    if (!origin) return true;
+    return /^https:\/\/[a-z0-9-]+\.github\.io$/i.test(origin);
+};
+
 const corsOptions = {
     origin: (origin, callback) => {
-        if (!origin || allowedOrigins.has(origin) || isAllowedLocalOrigin(origin)) {
+        if (!origin || allowedOrigins.has(origin) || isAllowedLocalOrigin(origin) || isAllowedHostedOrigin(origin)) {
             return callback(null, true);
         }
         return callback(new Error(`CORS blocked for origin: ${origin}`));
     },
-    methods: ['GET', 'POST', 'OPTIONS'],
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     credentials: true,
     optionsSuccessStatus: 200,
     allowedHeaders: ['Content-Type', 'Authorization']
@@ -91,10 +97,7 @@ const asyncHandler = (fn) => (req, res, next) => {
 };
 
 const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS || '30000', 10);
-const ALLOW_LOCAL_FALLBACK = String(process.env.ALLOW_LOCAL_FALLBACK || 'true').toLowerCase() === 'true';
-const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
-const OLLAMA_TIMEOUT_MS = parseInt(process.env.OLLAMA_TIMEOUT_MS || process.env.OLLAMA_TIMEOUT || '45000', 10);
+const ALLOW_LOCAL_FALLBACK = String(process.env.ALLOW_LOCAL_FALLBACK || 'false').toLowerCase() === 'true';
 
 const withTimeout = (promise, ms, label) => {
     let timeoutId;
@@ -160,54 +163,7 @@ function postJson(urlString, payload, timeoutMs = 30000) {
     });
 }
 
-async function chatWithOllama(message) {
-    const systemPrompt = "You are a friendly AI Resume Assistant for Stella Mary's College of Engineering. Help users with resume tips, interview prep, career guidance, and technical skills advice.";
-    const baseUrl = OLLAMA_BASE_URL.replace(/\/$/, '');
 
-    try {
-        const response = await postJson(
-            `${baseUrl}/api/chat`,
-            {
-                model: OLLAMA_MODEL,
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: message }
-                ],
-                stream: false
-            },
-            OLLAMA_TIMEOUT_MS
-        );
-
-        const content = response?.message?.content || response?.response;
-        if (!content) {
-            throw new Error('Ollama returned empty response');
-        }
-
-        return content;
-    } catch (chatError) {
-        const errorMessage = chatError?.message || String(chatError);
-        if (!errorMessage.includes('404')) {
-            throw chatError;
-        }
-
-        const fallbackResponse = await postJson(
-            `${baseUrl}/api/generate`,
-            {
-                model: OLLAMA_MODEL,
-                prompt: `${systemPrompt}\n\nUser question: ${message}`,
-                stream: false
-            },
-            OLLAMA_TIMEOUT_MS
-        );
-
-        const fallbackContent = fallbackResponse?.response || fallbackResponse?.message?.content;
-        if (!fallbackContent) {
-            throw new Error('Ollama returned empty fallback response');
-        }
-
-        return fallbackContent;
-    }
-}
 
 // Storage configuration
 const storage = multer.diskStorage({
@@ -246,12 +202,22 @@ const upload = multer({
 // Check if API keys are configured
 const hasOpenAIKey = process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.length > 0;
 const hasGoogleKey = process.env.GOOGLE_API_KEY && process.env.GOOGLE_API_KEY.length > 0;
+const hasOpenRouterKey = process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.length > 0;
 
 // OpenAI Configuration - only initialize if key is provided
 let openai = null;
 if (hasOpenAIKey) {
     openai = new OpenAI({
         apiKey: process.env.OPENAI_API_KEY
+    });
+}
+
+// OpenRouter Configuration - OpenAI-compatible API
+let openrouter = null;
+if (hasOpenRouterKey) {
+    openrouter = new OpenAI({
+        apiKey: process.env.OPENROUTER_API_KEY,
+        baseURL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1'
     });
 }
 
@@ -270,32 +236,59 @@ if (hasGoogleKey) {
 
 // Log API key status at startup
 console.log('\n📋 API Configuration Status:');
-console.log(`   OpenAI API Key: ${hasOpenAIKey ? '✅ Configured' : '❌ Not Set'}`);
-console.log(`   Google API Key: ${hasGoogleKey ? '✅ Configured' : '❌ Not Set'}`);
-console.log(`   Ollama URL: ${OLLAMA_BASE_URL}`);
-console.log(`   Ollama Model: ${OLLAMA_MODEL}`);
-console.log(`   AI Service: ${process.env.AI_SERVICE || 'google'}\n`);
+if (process.env.AI_SERVICE === 'openrouter') {
+    console.log(`   OpenRouter API Key: ${hasOpenRouterKey ? '✅ Configured' : '❌ Not Set'}`);
+    console.log(`   OpenRouter Model: ${process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'}`);
+    console.log(`   Primary Service: OpenRouter`);
+} else {
+    console.log(`   OpenAI API Key: ${hasOpenAIKey ? '✅ Configured' : '❌ Not Set'}`);
+    console.log(`   Google API Key: ${hasGoogleKey ? '✅ Configured' : '❌ Not Set'}`);
+    console.log(`   OpenRouter API Key: ${hasOpenRouterKey ? '✅ Configured' : '❌ Not Set'}`);
+}
+console.log(`   AI Service: ${process.env.AI_SERVICE || 'google'}`);
+console.log(`   Local Fallback: ${ALLOW_LOCAL_FALLBACK ? 'Enabled' : 'Disabled'}\n`);
 
 // Store for analysis results (in production, use database)
 let analysisDatabase = [];
 const uploadedFileIndex = new Map();
 
 // Utility: Extract text from resume
+function normalizeExtractedText(rawText) {
+    if (!rawText) return '';
+    return String(rawText)
+        .replace(/\u0000/g, ' ')
+        .replace(/\r/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/[ \t]{2,}/g, ' ')
+        .trim();
+}
+
+function hasMinimumTextSignal(text) {
+    if (!text) return false;
+    const words = text.match(/[a-zA-Z][a-zA-Z0-9+.#-]*/g) || [];
+    const uniqueWordCount = new Set(words.map((word) => word.toLowerCase())).size;
+    return text.length >= 120 && words.length >= 40 && uniqueWordCount >= 25;
+}
+
 async function extractTextFromResume(filePath) {
     const ext = path.extname(filePath).toLowerCase();
     
     try {
         if (ext === '.txt') {
-            const text = fs.readFileSync(filePath, 'utf-8');
-            return text.trim() || null;
+            const text = normalizeExtractedText(fs.readFileSync(filePath, 'utf-8'));
+            if (!hasMinimumTextSignal(text)) {
+                console.warn('⚠️ TXT content is too short or low-signal for reliable scoring.');
+                return null;
+            }
+            return text;
         } else if (ext === '.pdf') {
             try {
                 const pdfParse = require('pdf-parse');
                 const dataBuffer = fs.readFileSync(filePath);
                 const data = await pdfParse(dataBuffer);
-                const text = data.text?.trim();
-                if (!text || text.length < 50) {
-                    console.warn('⚠️  PDF may be image-based or empty. Extracted text length:', text?.length || 0);
+                const text = normalizeExtractedText(data.text);
+                if (!hasMinimumTextSignal(text)) {
+                    console.warn('⚠️ PDF may be image-based/empty or not parseable enough for reliable scoring. Extracted text length:', text?.length || 0);
                     return null;
                 }
                 return text;
@@ -307,9 +300,9 @@ async function extractTextFromResume(filePath) {
             try {
                 const mammoth = require('mammoth');
                 const result = await mammoth.extractRawText({ path: filePath });
-                const text = result.value?.trim();
-                if (!text || text.length < 50) {
-                    console.warn('⚠️  DOCX may be empty. Extracted text length:', text?.length || 0);
+                const text = normalizeExtractedText(result.value);
+                if (!hasMinimumTextSignal(text)) {
+                    console.warn('⚠️ DOC/DOCX appears too short for reliable scoring. Extracted text length:', text?.length || 0);
                     return null;
                 }
                 return text;
@@ -327,55 +320,148 @@ async function extractTextFromResume(filePath) {
 }
 
 function analyzeResumeLocally(resumeText, candidateName, fallbackReason = '') {
-    const text = (resumeText || '').toString();
+    const text = normalizeExtractedText(resumeText);
     const lowerText = text.toLowerCase();
-    const firstLine = text.split(/\r?\n/).map(line => line.trim()).find(Boolean) || '';
+    const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+    const firstLine = lines.find((line) => line.length <= 60 && /[a-zA-Z]/.test(line) && !/(resume|curriculum|vitae|profile)/i.test(line)) || '';
 
-    const inferredName = firstLine && firstLine.length <= 60 ? firstLine : candidateName;
+    const emailMatch = text.match(/\b([a-z][a-z0-9._-]{1,30})@[a-z0-9.-]+\.[a-z]{2,}\b/i);
+    const emailBasedName = emailMatch
+        ? emailMatch[1]
+            .replace(/[._-]+/g, ' ')
+            .split(' ')
+            .filter(Boolean)
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+            .join(' ')
+        : '';
+    const inferredName = firstLine || emailBasedName || candidateName;
 
     const hasPhd = /\b(ph\.?d|doctorate)\b/i.test(text);
-    const hasME = /\b(m\.?e\.?|m\s*tech|master\s+of\s+engineering)\b/i.test(text);
-    const degree = hasPhd ? 'PhD' : hasME ? 'M.E' : 'Other';
+    const hasME = /\b(m\.?e\.?|m\.?tech|master\s+of\s+(engineering|technology|computer|science))\b/i.test(text);
+    const hasBE = /\b(b\.?e\.?|b\.?tech|bachelor\s+of\s+(engineering|technology|computer|science))\b/i.test(text);
+    const hasRelevantDiscipline = /(computer|information\s+technology|electronics|electrical|data\s+science|ai|machine\s+learning)/i.test(text);
+    const cgpaMatch = text.match(/\b(?:cgpa|gpa)\s*[:\-]?\s*(\d(?:\.\d{1,2})?)\b/i);
+    const cgpa = cgpaMatch ? Number(cgpaMatch[1]) : null;
 
-    const communicationPatterns = [
-        /communication/i,
-        /presentation/i,
-        /verbal/i,
-        /written/i,
-        /public\s+speaking/i,
-        /interpersonal/i
-    ];
-    const hasCommunicationSkills = communicationPatterns.some((pattern) => pattern.test(text));
+    let degree = 'Other';
+    let educationScore = 0.08;
+    if (hasPhd) {
+        degree = 'PhD';
+        educationScore = 0.25;
+    } else if (hasME) {
+        degree = 'M.E';
+        educationScore = 0.21;
+    } else if (hasBE) {
+        degree = 'B.E';
+        educationScore = 0.16;
+    }
+    if (hasRelevantDiscipline) educationScore += 0.02;
+    if (Number.isFinite(cgpa)) {
+        if (cgpa >= 8.5) educationScore += 0.01;
+        else if (cgpa < 6.5) educationScore -= 0.02;
+    }
+    educationScore = Math.max(0.04, Math.min(0.28, educationScore));
 
-    const requiredSkills = ['Python', 'Java', 'C++', 'HTML', 'JavaScript', 'CSS'];
-    const technicalSkills = requiredSkills.filter((skill) => {
-        if (skill === 'C++') return lowerText.includes('c++');
-        return new RegExp(`\\b${skill.toLowerCase()}\\b`, 'i').test(text);
-    });
+    const skillGroups = {
+        core: ['Python', 'Java', 'C++', 'JavaScript', 'HTML', 'CSS', 'SQL'],
+        frameworks: ['React', 'Node.js', 'Angular', 'Vue', 'Django', 'Flask', 'Spring', 'Express', 'FastAPI'],
+        dataAi: ['Machine Learning', 'Deep Learning', 'NLP', 'Pandas', 'NumPy', 'TensorFlow', 'PyTorch'],
+        cloudDevOps: ['AWS', 'Azure', 'GCP', 'Docker', 'Kubernetes', 'CI/CD', 'Jenkins', 'Git']
+    };
 
-    let score = 0.2;
-    score += degree === 'Other' ? 0.05 : 0.3;
-    score += hasCommunicationSkills ? 0.2 : 0;
-    score += (technicalSkills.length / requiredSkills.length) * 0.3;
-    score = Math.max(0, Math.min(1, score));
+    const skillSet = new Set();
+    const countDetected = (skills) => skills.filter((skill) => {
+        const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+        const found = new RegExp(`\\b${escaped}\\b`, 'i').test(text);
+        if (found) skillSet.add(skill);
+        return found;
+    }).length;
 
-    const approved = degree !== 'Other' && hasCommunicationSkills && technicalSkills.length >= 3;
+    const coreCount = countDetected(skillGroups.core);
+    const frameworkCount = countDetected(skillGroups.frameworks);
+    const dataAiCount = countDetected(skillGroups.dataAi);
+    const cloudCount = countDetected(skillGroups.cloudDevOps);
+    const technicalSkills = Array.from(skillSet);
+
+    const weightedSkillCoverage = (coreCount * 1.2) + frameworkCount + (dataAiCount * 1.1) + (cloudCount * 1.1);
+    let technicalScore = Math.min(0.30, 0.05 + (weightedSkillCoverage * 0.022));
+    if (coreCount <= 1) technicalScore = Math.min(technicalScore, 0.12);
+
+    const yearsMatches = [...text.matchAll(/\b(\d{1,2})\+?\s*(?:years?|yrs?)\b/gi)].map((m) => Number(m[1])).filter(Number.isFinite);
+    const maxYears = yearsMatches.length ? Math.max(...yearsMatches) : 0;
+    const hasInternship = /\bintern(ship)?\b/i.test(text);
+    const hasAcademicExp = /(research|teaching|assistant professor|lecturer|university|college)/i.test(text);
+    const hasLeadership = /(lead|team lead|mentor|managed|coordinated|president)/i.test(text);
+
+    let experienceScore = 0.04;
+    if (maxYears >= 5) experienceScore = 0.16;
+    else if (maxYears >= 3) experienceScore = 0.13;
+    else if (maxYears >= 1) experienceScore = 0.10;
+    else if (hasInternship) experienceScore = 0.07;
+    if (hasAcademicExp) experienceScore += 0.01;
+    if (hasLeadership) experienceScore += 0.01;
+    experienceScore = Math.min(0.18, experienceScore);
+
+    const projectMentions = (text.match(/\b(project|capstone|thesis|implemented|developed|designed|built)\b/gi) || []).length;
+    const hasGithub = /\bgithub\.com\//i.test(text);
+    const hasPortfolio = /(portfolio|behance|dribbble|personal\s+website)/i.test(text);
+    let projectScore = Math.min(0.12, 0.03 + (Math.min(projectMentions, 8) * 0.01));
+    if (hasGithub) projectScore += 0.01;
+    if (hasPortfolio) projectScore += 0.005;
+    projectScore = Math.min(0.12, projectScore);
+
+    const hasStrongComm = /(presentation|public\s+speaking|published|conference|documentation|client\s+communication|stakeholder)/i.test(text);
+    const hasBasicComm = /(communication|verbal|written|interpersonal|collaboration|teamwork)/i.test(text);
+    let communicationScore = hasStrongComm ? 0.07 : hasBasicComm ? 0.05 : 0.02;
+    communicationScore = Math.min(0.07, communicationScore);
+    const hasCommunicationSkills = hasStrongComm || hasBasicComm;
+
+    const hasCertification = /(certified|certification|coursera|udemy|nptel|oracle certified|aws certified|azure fundamentals)/i.test(text);
+    const achievementMentions = (text.match(/\b(increased|improved|reduced|optimized|achieved|won|rank|award|%|percent)\b/gi) || []).length;
+    let impactScore = 0.01;
+    if (hasCertification) impactScore += 0.02;
+    if (achievementMentions >= 2) impactScore += 0.02;
+    impactScore = Math.min(0.05, impactScore);
+
+    let penalty = 0;
+    if (!hasMinimumTextSignal(text)) penalty += 0.05;
+    if (text.length < 350) penalty += 0.04;
+    if (technicalSkills.length <= 1) penalty += 0.03;
+    penalty = Math.min(0.12, penalty);
+
+    let score = educationScore + technicalScore + experienceScore + projectScore + communicationScore + impactScore - penalty;
+    score = Math.max(0.05, Math.min(0.95, score));
+
+    const approved = score >= 0.62 && technicalScore >= 0.16 && educationScore >= 0.14;
 
     const strengths = [];
     const weaknesses = [];
 
-    if (degree !== 'Other') strengths.push(`Relevant degree detected: ${degree}`);
-    else weaknesses.push('Required M.E/PhD degree not clearly found');
+    if (degree === 'PhD') strengths.push('Excellent educational qualification (PhD)');
+    else if (degree === 'M.E') strengths.push('Strong postgraduate qualification (M.E/M.Tech)');
+    else if (degree === 'B.E') strengths.push('Relevant engineering degree foundation');
+    else weaknesses.push('Educational qualification not clearly aligned with engineering/technical role');
 
-    if (hasCommunicationSkills) strengths.push('Communication/presentation indicators found');
-    else weaknesses.push('Communication skill evidence not found clearly');
+    if (technicalSkills.length >= 8) strengths.push(`Strong technical breadth (${technicalSkills.slice(0, 10).join(', ')})`);
+    else if (technicalSkills.length >= 4) strengths.push(`Good technical stack coverage (${technicalSkills.join(', ')})`);
+    else weaknesses.push('Limited technical depth detected for this role');
 
-    if (technicalSkills.length > 0) strengths.push(`Technical skills found: ${technicalSkills.join(', ')}`);
-    if (technicalSkills.length < 3) weaknesses.push('Fewer than 3 required technical skills detected');
+    if (maxYears >= 3 || hasAcademicExp) strengths.push('Meaningful professional/academic experience present');
+    else if (hasInternship) strengths.push('Hands-on internship exposure present');
+    else weaknesses.push('Experience evidence is limited');
+
+    if (projectMentions >= 4 || hasGithub) strengths.push('Projects and implementation evidence are present');
+    else weaknesses.push('Project evidence is insufficient or not clearly described');
+
+    if (!hasCommunicationSkills) weaknesses.push('Communication indicators are weak or missing');
+    if (!hasCertification && achievementMentions < 2) weaknesses.push('Certifications/quantified achievements are minimal');
+    if (penalty > 0.05) weaknesses.push('Resume content quality is too low/noisy for highly confident scoring');
 
     const assessment = approved
-        ? 'Resume meets core screening criteria based on local fallback analysis.'
-        : 'Resume does not fully meet screening criteria based on local fallback analysis.';
+        ? `Resume demonstrates strong overall fit with a score of ${Math.round(score * 100)}%. Candidate shows good alignment in education, technical capability, and practical project/experience signals.`
+        : `Resume score is ${Math.round(score * 100)}%, below approval threshold. Profile has gaps in one or more key areas (education relevance, technical depth, experience/projects, or measurable impact).`;
+
+    const localModeNote = fallbackReason ? ' [Local analysis mode]' : '';
 
     return {
         candidateName: inferredName || candidateName || 'Candidate',
@@ -386,10 +472,19 @@ function analyzeResumeLocally(resumeText, candidateName, fallbackReason = '') {
         strengths,
         weaknesses,
         assessment,
-        feedback: `${assessment}${fallbackReason ? ` (Fallback reason: ${fallbackReason})` : ''}`,
+        feedback: `${assessment}${localModeNote}`,
         status: approved ? 'approved' : 'rejected',
         recommendation: approved ? 'APPROVED' : 'REJECTED',
         timestamp: new Date(),
+        scoreBreakdown: {
+            education: Number(educationScore.toFixed(3)),
+            technical: Number(technicalScore.toFixed(3)),
+            experience: Number(experienceScore.toFixed(3)),
+            projects: Number(projectScore.toFixed(3)),
+            communication: Number(communicationScore.toFixed(3)),
+            impact: Number(impactScore.toFixed(3)),
+            penalty: Number(penalty.toFixed(3))
+        },
         fallbackUsed: true
     };
 }
@@ -398,44 +493,95 @@ function analyzeResumeLocally(resumeText, candidateName, fallbackReason = '') {
 async function analyzeResumeWithAI(resumeText, candidateName) {
     try {
         const prompt = `
-You are an expert HR recruiter for Stella Mary's College of Engineering. Analyze the following resume and provide a screening decision.
+You are an expert HR recruiter for academic institutions. Analyze this resume with REALISTIC and STRICT evaluation standards.
 
 Resume:
 ${resumeText}
 
-REQUIRED CRITERIA:
-- Education: M.E or PhD degree (Computer Science preferred)
-- Communication Skills: MUST be present (written/verbal/presentation)
-- Technical Skills: Check fohttp://localhost:3000r Python, Java, C++, HTML, JavaScript, CSS
+EVALUATION CRITERIA:
 
-Please analyze this resume and provide:
-1. A brief assessment (2-3 sentences)
-2. A match score from 0 to 1 (0.0 to 1.0)
-3. Key strengths
-4. Key weaknesses
-5. Degree qualification (B.E,M.E, PhD, or Other)
-6. Communication skills presence (Yes/No)
-7. Technical skills found (list from: Python, Java, C++, HTML, JavaScript, CSS or other)
-8. Recommendation: "APPROVED" (pass to principal for final approval) or "REJECTED" (does not meet criteria)
+EDUCATION REQUIREMENTS (40% weight):
+- PhD: Excellent match (0.35-0.40 points) 
+- M.E/M.Tech in relevant field: Good match (0.25-0.35 points)
+- B.E/B.Tech with strong experience: Acceptable (0.15-0.25 points)
+- Other degrees: Poor match (0.0-0.15 points)
 
-Format your response as JSON:
+TECHNICAL SKILLS (35% weight):
+- Core: Python, Java, C++, JavaScript, HTML, CSS
+- Advanced: React, Node.js, Machine Learning, Databases, Cloud platforms
+- 6+ skills: Excellent (0.30-0.35 points)
+- 4-5 skills: Good (0.20-0.29 points)
+- 2-3 skills: Fair (0.10-0.19 points)
+- <2 skills: Poor (0.0-0.09 points)
+
+EXPERIENCE QUALITY (15% weight):
+- Relevant teaching/research: 0.10-0.15 points
+- Industry experience in tech: 0.05-0.12 points
+- Fresh graduate: 0.0-0.05 points
+
+COMMUNICATION SKILLS (10% weight):
+- Clear evidence (presentations/papers/teaching): 0.08-0.10 points
+- Some indicators: 0.04-0.07 points
+- Not evident: 0.0-0.03 points
+
+SCORING GUIDELINES:
+- 0.85-1.0: Exceptional candidate (very rare)
+- 0.70-0.84: Strong candidate 
+- 0.55-0.69: Average candidate
+- 0.40-0.54: Below average
+- 0.0-0.39: Poor fit
+
+BE REALISTIC - Most candidates score 0.45-0.75. Only truly exceptional candidates should score above 0.80.
+
+Provide detailed analysis in JSON format:
 {
-    "candidateName": "extracted name or 'Candidate'",
-    "score": 0.75,
-    "degree": "M.E/PhD/Other",
+    "candidateName": "extracted name",
+    "score": 0.65,
+    "degree": "B.E/M.E/PhD/Other",
     "hasCommunicationSkills": true,
     "technicalSkills": ["Python", "Java"],
-    "strengths": ["strength1", "strength2"],
-    "weaknesses": ["weakness1", "weakness2"],
-    "assessment": "brief assessment",
+    "strengths": ["specific strength 1", "specific strength 2"],
+    "weaknesses": ["specific weakness 1", "specific weakness 2"],
+    "assessment": "detailed 2-3 sentence assessment",
     "recommendation": "APPROVED or REJECTED"
 }`;
 
         let content;
-        const aiService = process.env.AI_SERVICE || 'google';
+        const aiService = (process.env.AI_SERVICE || 'google').toLowerCase();
+         
+
+        if (aiService === 'local') {
+            console.log('🟡 Using Local Analysis Mode...');
+            return analyzeResumeLocally(resumeText, candidateName, 'local_mode_enabled');
+        }
         
+        // Try OpenRouter directly (if configured)
+        if (aiService === 'openrouter' && openrouter) {
+            const openRouterModel = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
+            console.log('🟣 Using OpenRouter API...');
+            const response = await withTimeout(
+                openrouter.chat.completions.create({
+                    model: openRouterModel,
+                    messages: [
+                        {
+                            role: 'system',
+                            content: 'You are an expert HR recruiting assistant. Analyze resumes and provide screening recommendations based on typical job requirements.'
+                        },
+                        {
+                            role: 'user',
+                            content: prompt
+                        }
+                    ],
+                    temperature: 0.7,
+                    max_tokens: 600
+                }),
+                AI_TIMEOUT_MS,
+                'OpenRouter request'
+            );
+            content = response.choices[0].message.content;
+        }
         // Try Google Gemini first (if configured)
-        if (aiService === 'google' && process.env.GOOGLE_API_KEY && model) {
+        else if (aiService === 'google' && process.env.GOOGLE_API_KEY && model) {
             try {
                 console.log('🔵 Using Google Gemini API...');
                 const result = await withTimeout(
@@ -450,13 +596,18 @@ Format your response as JSON:
 
                 // Check if it's a quota error
                 if (googleErrorMessage.includes('429') || googleErrorMessage.includes('quota') || googleErrorMessage.includes('rate limit')) {
-                    console.warn('⚠️ Google Gemini quota exceeded. Trying OpenAI...');
+                    console.warn('⚠️ Google Gemini quota exceeded. Trying fallback provider...');
                     
-                    if (openai) {
+                    if (openrouter || openai) {
                         try {
+                            const aiClient = openrouter || openai;
+                            const aiClientLabel = openrouter ? 'OpenRouter' : 'OpenAI';
+                            const fallbackModel = openrouter
+                                ? (process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini')
+                                : 'gpt-3.5-turbo';
                             const response = await withTimeout(
-                                openai.chat.completions.create({
-                                    model: "gpt-3.5-turbo",
+                                aiClient.chat.completions.create({
+                                    model: fallbackModel,
                                     messages: [
                                         {
                                             role: "system",
@@ -471,27 +622,32 @@ Format your response as JSON:
                                     max_tokens: 600
                                 }),
                                 AI_TIMEOUT_MS,
-                                'OpenAI request'
+                                `${aiClientLabel} request`
                             );
                             content = response.choices[0].message.content;
                         } catch (openaiError) {
                             const openaiErrorMsg = openaiError.message || String(openaiError);
                             if (openaiErrorMsg.includes('401') || openaiErrorMsg.includes('invalid api key') || openaiErrorMsg.includes('API key')) {
-                                throw new Error('⚠️ Both Google Gemini (quota exceeded) and OpenAI (invalid API key) failed. Please check your API keys in the .env file.');
+                                throw new Error('⚠️ Google Gemini quota exceeded and fallback provider API key is invalid. Please check OPENROUTER_API_KEY / OPENAI_API_KEY in .env.');
                             }
                             throw openaiError;
                         }
                     } else {
-                        throw new Error('⚠️ Google Gemini quota exceeded and OpenAI is not configured. Please check your API keys.');
+                        throw new Error('⚠️ Google Gemini quota exceeded and no fallback provider is configured. Please set OPENROUTER_API_KEY or OPENAI_API_KEY.');
                     }
-                } else if (!process.env.OPENAI_API_KEY) {
+                } else if (!process.env.OPENROUTER_API_KEY && !process.env.OPENAI_API_KEY) {
                     throw googleError;
                 } else {
-                    // Try OpenAI as fallback
-                    console.warn('⚠️ Falling back to OpenAI...');
+                    // Try OpenRouter/OpenAI as fallback
+                    const aiClient = openrouter || openai;
+                    const aiClientLabel = openrouter ? 'OpenRouter' : 'OpenAI';
+                    const fallbackModel = openrouter
+                        ? (process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini')
+                        : 'gpt-3.5-turbo';
+                    console.warn(`⚠️ Falling back to ${aiClientLabel}...`);
                     const response = await withTimeout(
-                        openai.chat.completions.create({
-                            model: "gpt-3.5-turbo",
+                        aiClient.chat.completions.create({
+                            model: fallbackModel,
                             messages: [
                                 {
                                     role: "system",
@@ -506,17 +662,22 @@ Format your response as JSON:
                             max_tokens: 600
                         }),
                         AI_TIMEOUT_MS,
-                        'OpenAI request'
+                        `${aiClientLabel} request`
                     );
                     content = response.choices[0].message.content;
                 }
             }
-        } else if (openai) {
+        } else if (openrouter || openai) {
             // Use OpenAI directly
-            console.log('🟢 Using OpenAI API...');
+            const aiClient = openrouter || openai;
+            const aiClientLabel = openrouter ? 'OpenRouter' : 'OpenAI';
+            const fallbackModel = openrouter
+                ? (process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini')
+                : 'gpt-3.5-turbo';
+            console.log(`${openrouter ? '🟣' : '🟢'} Using ${aiClientLabel} API...`);
             const response = await withTimeout(
-                openai.chat.completions.create({
-                    model: "gpt-3.5-turbo",
+                aiClient.chat.completions.create({
+                    model: fallbackModel,
                     messages: [
                         {
                             role: "system",
@@ -531,11 +692,11 @@ Format your response as JSON:
                     max_tokens: 600
                 }),
                 AI_TIMEOUT_MS,
-                'OpenAI request'
+                `${aiClientLabel} request`
             );
             content = response.choices[0].message.content;
         } else {
-            throw new Error('⚠️ No AI service configured. Please set either GOOGLE_API_KEY or OPENAI_API_KEY in the .env file.');
+            throw new Error('⚠️ OpenRouter not configured or AI service misconfigured. Please check OPENROUTER_API_KEY and AI_SERVICE in .env.');
         }
         
         // Parse JSON from response
@@ -546,7 +707,10 @@ Format your response as JSON:
             const weaknesses = Array.isArray(analysis.weaknesses) ? analysis.weaknesses : [];
             const technicalSkills = Array.isArray(analysis.technicalSkills) ? analysis.technicalSkills : [];
             const parsedScore = Number(analysis.score);
-            const score = Number.isFinite(parsedScore) ? Math.max(0, Math.min(1, parsedScore)) : 0.5;
+            if (!Number.isFinite(parsedScore)) {
+                throw new Error('AI response missing a valid numeric score.');
+            }
+            const score = Math.max(0, Math.min(1, parsedScore));
             const recommendation = String(analysis.recommendation || '').toUpperCase();
 
             return {
@@ -576,7 +740,7 @@ Format your response as JSON:
         } else if (error.code === 'ECONNRESET' || error.code === 'ECONNREFUSED') {
             errorMsg = '⚠️ Cannot connect to AI API. Please check network and API service status.';
         } else if (error.status === 401 || lowerErrorMsg.includes('401') || lowerErrorMsg.includes('invalid api key')) {
-            errorMsg = '⚠️ Invalid API key. Please update OPENAI_API_KEY or GOOGLE_API_KEY.';
+            errorMsg = '⚠️ Invalid API key. Please update OPENROUTER_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY.';
         }
         
         if (ALLOW_LOCAL_FALLBACK) {
@@ -835,10 +999,93 @@ app.post('/api/cleanup', asyncHandler(async (req, res) => {
     // The analysis results should persist even after uploaded files are cleaned up
 }));
 
+// Delete individual analysis result
+app.delete('/api/result/:fileId', asyncHandler(async (req, res) => {
+    const { fileId } = req.params;
+    
+    if (!fileId) {
+        return res.status(400).json({
+            success: false,
+            message: 'File ID is required'
+        });
+    }
+    
+    // Find and remove from analysis database
+    const resultIndex = analysisDatabase.findIndex(item => item.fileId === fileId);
+    let deletedResult = null;
+    
+    if (resultIndex !== -1) {
+        deletedResult = analysisDatabase[resultIndex];
+        analysisDatabase.splice(resultIndex, 1);
+    }
+    
+    // Remove from uploaded file index and delete actual file
+    const fileMeta = uploadedFileIndex.get(fileId);
+    if (fileMeta && fileMeta.path && fs.existsSync(fileMeta.path)) {
+        try {
+            fs.unlinkSync(fileMeta.path);
+            console.log(`🗑️ Deleted file: ${fileMeta.name}`);
+        } catch (err) {
+            console.error(`Error deleting file ${fileMeta.name}:`, err);
+        }
+    }
+    
+    uploadedFileIndex.delete(fileId);
+    
+    console.log(`🗑️ Deleted result for file ID: ${fileId}`);
+    
+    res.json({
+        success: true,
+        message: 'Result and file deleted successfully',
+        deletedFileId: fileId,
+        fileName: fileMeta?.name || 'Unknown'
+    });
+}));
+
+// Clear all analysis results (for removing test data)
+app.post('/api/clear-results', asyncHandler(async (req, res) => {
+    const previousCount = analysisDatabase.length;
+    analysisDatabase.length = 0; // Clear the array
+    uploadedFileIndex.clear(); // Clear the file index as well
+    
+    console.log(`🗑️ Cleared ${previousCount} analysis result(s) from database.`);
+    
+    res.json({
+        success: true,
+        message: `Cleared ${previousCount} analysis result(s)`,
+        previousCount: previousCount
+    });
+}));
+
+function buildResumeFeedbackContext(analysisEntry) {
+    if (!analysisEntry || !analysisEntry.analysis) {
+        return 'No uploaded resume analysis is available yet.';
+    }
+
+    const analysis = analysisEntry.analysis;
+    const scorePct = Math.round((Number(analysis.score) || 0) * 100);
+    const strengths = Array.isArray(analysis.strengths) ? analysis.strengths : [];
+    const weaknesses = Array.isArray(analysis.weaknesses) ? analysis.weaknesses : [];
+    const technicalSkills = Array.isArray(analysis.technicalSkills) ? analysis.technicalSkills : [];
+
+    return `Latest uploaded resume analysis:
+- Candidate: ${analysis.candidateName || 'Candidate'}
+- File ID: ${analysisEntry.fileId}
+- Score: ${scorePct}%
+- Degree: ${analysis.degree || 'Not specified'}
+- Recommendation: ${analysis.recommendation || 'REJECTED'}
+- Status: ${analysis.status || 'rejected'}
+- Communication Skills: ${analysis.hasCommunicationSkills ? 'Present' : 'Not evident'}
+- Technical Skills: ${technicalSkills.length ? technicalSkills.join(', ') : 'None detected'}
+- Strengths: ${strengths.length ? strengths.join('; ') : 'None listed'}
+- Weaknesses: ${weaknesses.length ? weaknesses.join('; ') : 'None listed'}
+- Assessment: ${analysis.assessment || analysis.feedback || 'No assessment available'}`;
+}
+
 // Chat with AI chatbot endpoint
 app.post('/api/chat', asyncHandler(async (req, res) => {
     try {
-        const { message } = req.body;
+        const { message, fileId } = req.body;
 
         if (!message) {
             return res.status(400).json({
@@ -849,29 +1096,34 @@ app.post('/api/chat', asyncHandler(async (req, res) => {
 
         console.log(`💬 Chat request: ${message}`);
 
+        const selectedAnalysis = fileId
+            ? analysisDatabase.find((item) => item.fileId === fileId)
+            : null;
+        const latestAnalysis = analysisDatabase.length
+            ? analysisDatabase[analysisDatabase.length - 1]
+            : null;
+        const resumeContext = buildResumeFeedbackContext(selectedAnalysis || latestAnalysis);
+
         // Build the chatbot prompt
-        const chatPrompt = `You are an AI Resume Assistant for Stella Mary's College of Engineering. 
-You help students and job seekers with:
-- Resume writing tips and improvements
-- Interview preparation
-- Career guidance
-- Technical skills advice (Python, Java, C++, HTML, JavaScript, CSS)
-- How to score 100% on resume screening
-- Communication skills development
+        const chatPrompt = `You are HEIR, an AI assistant for Stella Mary's College of Engineering.
+    Answer user questions clearly and accurately.
 
-Be friendly, helpful, and concise. Use emoji where appropriate. Provide practical advice.
+    Behavior rules:
+    - If asked about resumes, interview prep, careers, or technical skills, give practical step-by-step guidance.
+    - If resume analysis context is provided below, use it as the primary source for resume feedback.
+    - If asked a general question (not resume-related), still provide a helpful direct answer.
+    - Keep answers concise, correct, and friendly.
+    - If uncertain, say what is uncertain and provide best next step.
 
-User question: ${message}`;
+    ${resumeContext}
+
+    User question: ${message}`;
 
         let content;
-        const aiService = (process.env.AI_SERVICE || 'google').toLowerCase();
+        const aiService = (process.env.CHAT_AI_SERVICE || process.env.AI_SERVICE || 'google').toLowerCase();
 
-        if (aiService === 'ollama') {
-            console.log('🟠 Using Ollama for chat...');
-            content = await chatWithOllama(message);
-        }
         // Try Google Gemini first
-        else if (aiService === 'google' && process.env.GOOGLE_API_KEY && model) {
+        if (aiService === 'google' && process.env.GOOGLE_API_KEY && model) {
             try {
                 console.log('🔵 Using Google Gemini for chat...');
                 const result = await withTimeout(
@@ -886,12 +1138,17 @@ User question: ${message}`;
 
                 // Check if quota error, try OpenAI
                 if (googleErrorMessage.includes('429') || googleErrorMessage.includes('quota')) {
-                    if (openai) {
+                    if (openrouter || openai) {
                         try {
-                            console.log('🟢 Trying OpenAI for chat...');
+                            const aiClient = openrouter || openai;
+                            const aiClientLabel = openrouter ? 'OpenRouter' : 'OpenAI';
+                            const fallbackModel = openrouter
+                                ? (process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini')
+                                : 'gpt-3.5-turbo';
+                            console.log(`${openrouter ? '🟣' : '🟢'} Trying ${aiClientLabel} for chat...`);
                             const response = await withTimeout(
-                                openai.chat.completions.create({
-                                    model: "gpt-3.5-turbo",
+                                aiClient.chat.completions.create({
+                                    model: fallbackModel,
                                     messages: [
                                         {
                                             role: "system",
@@ -899,34 +1156,60 @@ User question: ${message}`;
                                         },
                                         {
                                             role: "user",
-                                            content: message
+                                            content: chatPrompt
                                         }
                                     ],
                                     temperature: 0.7,
                                     max_tokens: 500
                                 }),
                                 AI_TIMEOUT_MS,
-                                'OpenAI chat request'
+                                `${aiClientLabel} chat request`
                             );
                             content = response.choices[0].message.content;
                         } catch (openaiError) {
-                            console.log('🟠 Trying Ollama fallback for chat...');
-                            content = await chatWithOllama(message);
+                            console.error('❌ OpenAI fallback failed:', openaiError.message);
+                            throw googleError;
                         }
                     } else {
-                        console.log('🟠 Trying Ollama fallback for chat...');
-                        content = await chatWithOllama(message);
+                        throw googleError;
                     }
                 } else {
                     throw googleError;
                 }
             }
-        } else if (openai) {
-            // Use OpenAI directly
-            console.log('🟢 Using OpenAI for chat...');
+        } else if (aiService === 'openrouter' && openrouter) {
+            console.log('🟣 Using OpenRouter for chat...');
             const response = await withTimeout(
-                openai.chat.completions.create({
-                    model: "gpt-3.5-turbo",
+                openrouter.chat.completions.create({
+                    model: process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini',
+                    messages: [
+                        {
+                            role: 'system',
+                            content: "You are a friendly AI Resume Assistant for Stella Mary's College of Engineering. Help users with resume tips, interview prep, career guidance, and technical skills advice."
+                        },
+                        {
+                            role: 'user',
+                            content: chatPrompt
+                        }
+                    ],
+                    temperature: 0.7,
+                    max_tokens: 500
+                }),
+                AI_TIMEOUT_MS,
+                'OpenRouter chat request'
+            );
+            content = response.choices[0].message.content;
+        } else if (openrouter || openai) {
+            // Use OpenRouter/OpenAI directly
+            const aiClient = openrouter || openai;
+            const aiClientLabel = openrouter ? 'OpenRouter' : 'OpenAI';
+            const fallbackModel = openrouter
+                ? (process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini')
+                : 'gpt-3.5-turbo';
+            console.log(`${openrouter ? '🟣' : '🟢'} Using ${aiClientLabel} for chat...`);
+            const response = await withTimeout(
+                aiClient.chat.completions.create({
+                    model: fallbackModel,
                     messages: [
                         {
                             role: "system",
@@ -934,21 +1217,18 @@ User question: ${message}`;
                         },
                         {
                             role: "user",
-                            content: message
+                            content: chatPrompt
                         }
                     ],
                     temperature: 0.7,
                     max_tokens: 500
                 }),
                 AI_TIMEOUT_MS,
-                'OpenAI chat request'
+                `${aiClientLabel} chat request`
             );
             content = response.choices[0].message.content;
-        } else if (OLLAMA_BASE_URL) {
-            console.log('🟠 Falling back to Ollama for chat...');
-            content = await chatWithOllama(message);
         } else {
-            throw new Error('No AI service configured. Set AI_SERVICE=ollama or configure OPENAI_API_KEY/GOOGLE_API_KEY in .env file.');
+            throw new Error('No chat AI service configured. Set CHAT_AI_SERVICE (openrouter/google/openai) or configure API keys in .env.');
         }
 
         console.log(`✅ Chat response generated`);
@@ -1039,10 +1319,13 @@ app.listen(PORT, () => {
     console.log('  POST   /api/upload          - Upload resumes');
     console.log('  POST   /api/analyze         - Analyze uploaded resume');
     console.log('  POST   /api/send-approval   - Send to principal');
+    console.log('  POST   /api/chat            - Chat with AI assistant');
     console.log('  GET    /api/results         - Get all analysis results');
     console.log('  GET    /api/stats           - Get system statistics');
     console.log('  GET    /api/health          - Health check');
-    console.log('  POST   /api/cleanup         - Clear all uploads');
+    console.log('  POST   /api/cleanup         - Clear uploaded files');
+    console.log('  POST   /api/clear-results   - Clear analysis database');
+    console.log('  DELETE /api/result/:fileId  - Delete individual result and file');
     console.log(`${'='.repeat(60)}\n`);
 });
 

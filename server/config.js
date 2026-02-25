@@ -43,13 +43,7 @@ const AI_CONFIG = {
     RETRY_ATTEMPTS: 3
 };
 
-// Ollama Local LLM Configuration
-const OLLAMA_CONFIG = {
-    HOST: process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || 'http://127.0.0.1:11434',
-    MODEL: process.env.OLLAMA_MODEL || 'llama3.2',
-    TIMEOUT: parseInt(process.env.OLLAMA_TIMEOUT_MS || process.env.OLLAMA_TIMEOUT || '60000', 10),  // 60 seconds for local models
-    STREAM: false  // Set to true for streaming responses
-};
+
 
 // Email Configuration
 const EMAIL_CONFIG = {
@@ -118,7 +112,6 @@ module.exports = {
     CRITERIA_WEIGHTS,
     UPLOAD_CONFIG,
     AI_CONFIG,
-    OLLAMA_CONFIG,
     EMAIL_CONFIG,
     LOG_CONFIG,
     ROLES,

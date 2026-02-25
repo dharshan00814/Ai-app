@@ -641,9 +641,6 @@
                 
                 <div id="messageContainer"></div>
                 
-                <!-- Debug: Show results count -->
-                <div id="debugInfo" style="background: #2d3748; padding: 10px; border-radius: 6px; margin-bottom: 10px; color: #63b3ed; font-family: monospace; font-size: 14px;"></div>
-
                 <div class="analysis-results" id="resultsContainer" style="min-height: 100px; border: 2px solid rgba(66, 153, 225, 0.3);">
                     <p style="color: #999; text-align: center; padding: 20px;">
                         Upload resumes to see analysis results here
@@ -1247,6 +1244,20 @@
             const host = window.location.hostname;
             const port = window.location.port;
 
+            const normalizeApiUrl = (url) => {
+                if (!url) return null;
+                const trimmed = String(url).trim().replace(/\/+$/, '');
+                return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
+            };
+
+            const queryApi = new URLSearchParams(window.location.search).get('api');
+            const storedApi = window.localStorage.getItem('APP_API_BASE_URL');
+            const configuredApi = normalizeApiUrl(queryApi || storedApi || window.APP_API_BASE_URL || '');
+
+            if (configuredApi) {
+                return configuredApi;
+            }
+
             // If UI is served by backend itself, use same-origin API to avoid CORS.
             if ((host === 'localhost' || host === '127.0.0.1') && port === '3000') {
                 return '/api';
@@ -1257,12 +1268,14 @@
                 return `http://${host}:3000/api`;
             }
 
-            // Fallback for unexpected hosts.
-            return 'http://localhost:3000/api';
+            // Hosted fallback: use backend on same host if available.
+            return `${window.location.origin}/api`;
         })();
         let uploadedFiles = [];
         let analysisResults = [];
         let connectionErrorVisible = false;
+        let isLoadingExistingResults = false;
+        let lastServerResultsSignature = '';
 
         // Modern Chat Functions
         function showModernChat() {
@@ -1304,7 +1317,7 @@
             }
         }
 
-        function sendModernMessage() {
+        async function sendModernMessage() {
             const input = document.getElementById('modernChatInput');
             const messagesContainer = document.getElementById('modernChatMessages');
             if (!input || !messagesContainer) return;
@@ -1324,8 +1337,63 @@
             input.value = '';
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
-            setTimeout(() => {
-                const botResponse = getBotResponse(message);
+            const typingMessage = document.createElement('div');
+            typingMessage.className = 'message-wrapper bot';
+            typingMessage.innerHTML = `
+                <div class="message-avatar">
+                    <div class="avatar-robot">
+                        <div class="avatar-eye"></div>
+                    </div>
+                </div>
+                <div class="message-bubble bot-bubble">
+                    <p>🤖 Thinking...</p>
+                    <span class="message-time">Just now</span>
+                </div>
+            `;
+            messagesContainer.appendChild(typingMessage);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+            try {
+                const latestAnalyzed = [...analysisResults].reverse().find((item) => item && item.fileId);
+                const response = await fetch(`${API_URL}/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message,
+                        fileId: latestAnalyzed ? latestAnalyzed.fileId : undefined
+                    })
+                });
+
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.success) {
+                    throw new Error(data.message || `HTTP ${response.status}: Chat failed`);
+                }
+
+                typingMessage.remove();
+
+                const botMessage = document.createElement('div');
+                botMessage.className = 'message-wrapper bot';
+                botMessage.innerHTML = `
+                    <div class="message-avatar">
+                        <div class="avatar-robot">
+                            <div class="avatar-eye"></div>
+                        </div>
+                    </div>
+                    <div class="message-bubble bot-bubble">
+                        <p>${String(data.message || '').replace(/\n/g, '<br>')}</p>
+                        <span class="message-time">Just now</span>
+                    </div>
+                `;
+                messagesContainer.appendChild(botMessage);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            } catch (error) {
+                console.warn('Chat API failed, using local fallback:', error.message);
+                typingMessage.remove();
+
+                const botResponse = getBotResponse(message, message);
                 const botMessage = document.createElement('div');
                 botMessage.className = 'message-wrapper bot';
                 botMessage.innerHTML = `
@@ -1341,7 +1409,7 @@
                 `;
                 messagesContainer.appendChild(botMessage);
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }, 600);
+            }
         }
 
         // Local resume analysis function for HEIR chatbot
@@ -1509,6 +1577,8 @@ ${analysis.improvements.length > 0 ? `<ul>${analysis.improvements.map(i => `<li>
 
         async function loadExistingResults(options = {}) {
             const { silent = true } = options;
+            if (isLoadingExistingResults) return;
+            isLoadingExistingResults = true;
             try {
                 const response = await fetch(`${API_URL}/results`, {
                     method: 'GET',
@@ -1524,8 +1594,22 @@ ${analysis.improvements.length > 0 ? `<ul>${analysis.improvements.map(i => `<li>
                     return;
                 }
 
+                const nextSignature = JSON.stringify(
+                    data.results.map(item => ({
+                        fileId: item?.fileId || '',
+                        status: item?.analysis?.status || '',
+                        score: typeof item?.analysis?.score === 'number' ? item.analysis.score : null
+                    }))
+                );
+
                 const serverResults = data.results
-                    .map(item => item?.analysis)
+                    .map(item => {
+                        if (!item?.analysis) return null;
+                        return {
+                            ...item.analysis,
+                            fileId: item.fileId
+                        };
+                    })
                     .filter(Boolean);
 
                 const uploadedFromResults = data.results.map(item => ({
@@ -1543,11 +1627,16 @@ ${analysis.improvements.length > 0 ? `<ul>${analysis.improvements.map(i => `<li>
                 const serverFileIds = new Set(uploadedFromResults.map(file => file.id));
                 const pendingOnlyLocal = pendingLocalFiles.filter(file => !serverFileIds.has(file.id));
 
+                if (nextSignature === lastServerResultsSignature && pendingOnlyLocal.length === 0) {
+                    return;
+                }
+
                 analysisResults = serverResults;
                 uploadedFiles = [...uploadedFromResults, ...pendingOnlyLocal];
+                lastServerResultsSignature = nextSignature;
 
                 updateFileList();
-                displayResults();
+                displayResults(false);
                 updateAllStats();
 
                 if (!silent && analysisResults.length > 0) {
@@ -1555,6 +1644,8 @@ ${analysis.improvements.length > 0 ? `<ul>${analysis.improvements.map(i => `<li>
                 }
             } catch (error) {
                 console.warn('Could not load existing results:', error.message);
+            } finally {
+                isLoadingExistingResults = false;
             }
         }
 
@@ -1582,10 +1673,10 @@ ${analysis.improvements.length > 0 ? `<ul>${analysis.improvements.map(i => `<li>
             setInterval(updateAllStats, 5000);
             // Re-check backend health so UI recovers automatically
             setInterval(checkSystemHealth, 30000);
-            // Ultra-fast sync (200ms) for real-time updates - no rate limits
+            // Periodic sync for cross-tab updates without overloading UI/network
             setInterval(() => {
                 loadExistingResults({ silent: true });
-            }, 200);
+            }, 5000);
         });
 
         // Check system health
@@ -1835,7 +1926,10 @@ ${analysis.improvements.length > 0 ? `<ul>${analysis.improvements.map(i => `<li>
                     }
 
                     if (data.success && data.analysis) {
-                        const result = data.analysis;
+                        const result = {
+                            ...data.analysis,
+                            fileId
+                        };
                         console.log('✅ Analysis result:', result);
                         analysisResults.push(result);
                         console.log('📋 Total results now:', analysisResults.length);
@@ -1914,14 +2008,8 @@ ${analysis.improvements.length > 0 ? `<ul>${analysis.improvements.map(i => `<li>
             });
         }
 
-        function displayResults() {
+        function displayResults(shouldScroll = true) {
             console.log('📊 displayResults() called - Total results:', analysisResults.length);
-            
-            // Update debug info
-            const debugDiv = document.getElementById('debugInfo');
-            if (debugDiv) {
-                debugDiv.innerHTML = `🔍 DEBUG: displayResults() called | Results: ${analysisResults.length} | Time: ${new Date().toLocaleTimeString()}`;
-            }
             
             // Clear container
             resultsContainer.innerHTML = '';
@@ -1993,7 +2081,7 @@ ${analysis.improvements.length > 0 ? `<ul>${analysis.improvements.map(i => `<li>
                         ${status === 'approved' ? `
                             <button class="btn-small btn-send" onclick="sendForApproval(${index})">📧 Send to Principal</button>
                         ` : ''}
-                        <button class="btn-small btn-reject" onclick="deleteResult(${index})">🗑️ Delete</button>
+                        <button class="btn-small btn-reject" onclick="deleteResult(${Number(index)})">🗑️ Delete</button>
                     </div>
                 `;
                 resultsContainer.appendChild(div);
@@ -2002,8 +2090,9 @@ ${analysis.improvements.length > 0 ? `<ul>${analysis.improvements.map(i => `<li>
             
             console.log(`✅ displayResults() complete. Total elements in container:`, resultsContainer.children.length);
             
-            // Scroll to results
-            resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if (shouldScroll) {
+                resultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
         }
 
         function sendForApproval(index) {
@@ -2105,11 +2194,54 @@ Stella Mary's College of Engineering
             });
         }
 
-        function deleteResult(index) {
-            analysisResults.splice(index, 1);
-            displayResults();
-            updateAllStats();
-            showMessage('🗑️ Result deleted', 'success');
+        async function deleteResult(index) {
+            if (index < 0 || index >= analysisResults.length) {
+                showMessage('❌ Invalid result selected', 'error');
+                return;
+            }
+            
+            const result = analysisResults[index];
+            const fileId = result.fileId;
+            
+            if (!fileId) {
+                // Fallback: just remove from frontend if no fileId
+                analysisResults.splice(index, 1);
+                displayResults();
+                updateAllStats();
+                showMessage('🗑️ Result deleted', 'success');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_URL}/result/${fileId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Remove from frontend
+                    analysisResults.splice(index, 1);
+                    
+                    // Also remove from uploadedFiles if it exists
+                    const fileIndex = uploadedFiles.findIndex(f => f.id === fileId);
+                    if (fileIndex !== -1) {
+                        uploadedFiles.splice(fileIndex, 1);
+                    }
+                    
+                    displayResults();
+                    updateAllStats();
+                    showMessage(`🗑️ ${data.fileName} deleted successfully`, 'success');
+                } else {
+                    showMessage(`❌ Delete failed: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('Delete error:', error);
+                showMessage('❌ Network error during deletion', 'error');
+            }
         }
 
         function updateAllStats() {
@@ -2205,7 +2337,7 @@ Stella Mary's College of Engineering
                         📧 Email
                     </p>
                     <p style="margin: 0; font-size: 13px; line-height: 1.6; opacity: 0.95;">
-                        <strong>Principal:</strong><br>
+                        <strong>Recrutier:</strong><br>
                         <a href="mailto:jdharshan2@gmail.com" style="
                             color: white;
                             text-decoration: none;
